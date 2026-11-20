@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import baseConfig from "./vitest.config";
+import baseConfig from "./vitest.config.ts";
 
 /**
  * Testes de integração: usam um PostgreSQL real definido em `.env.test`

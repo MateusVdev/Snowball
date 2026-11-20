@@ -27,7 +27,10 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions Session[]
+  sessions    Session[]
+  funds       Fund[]
+  operations  Operation[]
+  auditEvents AuditEvent[]
 
   @@map("users")
 }
@@ -62,4 +65,154 @@ model LoginAttempt {
   @@index([email, createdAt])
   @@index([ipAddress, createdAt])
   @@map("login_attempts")
+}
+
+// ============================================================
+// Carteira (Etapa 2)
+// ============================================================
+
+/// Fundo imobiliário acompanhado pelo usuário.
+/// Nunca é apagado: "remover" = arquivar (archivedAt), preservando o histórico.
+model Fund {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  /// Código de negociação em maiúsculas (ex.: MXRF11). Único por usuário.
+  ticker     String
+  /// Opcional: não é preenchido automaticamente para não inventar informação.
+  name       String?
+  segment    String?
+  notes      String?
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operations Operation[]
+  quotes     PriceQuote[]
+  position   Position?
+
+  @@unique([userId, ticker])
+  @@map("funds")
+}
+
+enum OperationType {
+  /// Saldo inicial informado pelo usuário (quantidade + preço médio), sem data inventada.
+  INITIAL_BALANCE
+  BUY
+  SELL
+
+  @@map("operation_type")
+}
+
+enum OperationStatus {
+  ACTIVE
+  /// Cancelada pelo usuário (com motivo). Não entra no cálculo da posição.
+  CANCELED
+  /// Substituída por uma correção (ver correctedBy). Não entra no cálculo.
+  SUPERSEDED
+
+  @@map("operation_status")
+}
+
+/// Movimentação de cotas. Os dados informados são IMUTÁVEIS: correções criam
+/// uma nova operação e marcam a anterior como SUPERSEDED.
+model Operation {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id")
+  fundId      String          @map("fund_id")
+  type        OperationType
+  status      OperationStatus @default(ACTIVE)
+  /// Data do pregão. Nula apenas para INITIAL_BALANCE (data não informada).
+  tradeDate   DateTime?       @map("trade_date") @db.Date
+  /// Desempate entre operações da mesma data (ordem de registro). Correções herdam o da original.
+  sequence    Int             @default(autoincrement())
+  quantity    Decimal         @db.Decimal(18, 8)
+  /// Preço por cota (no saldo inicial: o preço médio informado).
+  unitPrice   Decimal         @map("unit_price") @db.Decimal(18, 8)
+  fees        Decimal         @default(0) @db.Decimal(18, 2)
+  /// Valor bruto: quantidade × preço (arredondado a centavos em BUY/SELL).
+  grossAmount Decimal         @map("gross_amount") @db.Decimal(18, 2)
+  /// Compra: bruto + taxas. Venda: bruto − taxas. Saldo inicial: custo informado.
+  netAmount   Decimal         @map("net_amount") @db.Decimal(18, 2)
+  notes       String?
+
+  // ---- Campos derivados (recalculados a cada alteração do fundo; nulos se inativa) ----
+  quantityAfter     Decimal? @map("quantity_after") @db.Decimal(18, 8)
+  averagePriceAfter Decimal? @map("average_price_after") @db.Decimal(18, 8)
+  /// Vendas: custo das cotas vendidas pelo preço médio anterior.
+  costOfSold        Decimal? @map("cost_of_sold") @db.Decimal(18, 2)
+  /// Vendas: resultado realizado (valor líquido − custo das cotas vendidas).
+  realizedResult    Decimal? @map("realized_result") @db.Decimal(18, 2)
+
+  // ---- Rastreabilidade ----
+  correctsId   String?   @unique @map("corrects_id")
+  voidedAt     DateTime? @map("voided_at") @db.Timestamptz(3)
+  voidReason   String?   @map("void_reason")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund        Fund       @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  corrects    Operation? @relation("OperationCorrection", fields: [correctsId], references: [id], onDelete: Restrict)
+  correctedBy Operation? @relation("OperationCorrection")
+
+  @@index([userId, tradeDate])
+  @@index([fundId, status])
+  @@map("operations")
+}
+
+/// Posição consolidada (cache). Sempre regravada na mesma transação que altera
+/// as operações do fundo; a fonte de verdade são as operações ativas.
+model Position {
+  fundId         String   @id @map("fund_id")
+  quantity       Decimal  @db.Decimal(18, 8)
+  /// Custo das cotas em carteira (inclui taxas de compra), precisão total.
+  totalCost      Decimal  @map("total_cost") @db.Decimal(30, 12)
+  /// Soma dos resultados realizados nas vendas, precisão total.
+  realizedResult Decimal  @map("realized_result") @db.Decimal(30, 12)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@map("positions")
+}
+
+enum QuoteSource {
+  /// Valor digitado pelo usuário como referência (não é cotação de mercado em tempo real).
+  MANUAL
+
+  @@map("quote_source")
+}
+
+/// Histórico de cotações. A cotação atual é a mais recente (recordedAt).
+model PriceQuote {
+  id            String      @id @default(cuid())
+  fundId        String      @map("fund_id")
+  price         Decimal     @db.Decimal(18, 8)
+  source        QuoteSource
+  /// Data a que o preço se refere, quando conhecida (nula se não informada).
+  referenceDate DateTime?   @map("reference_date") @db.Date
+  note          String?
+  recordedAt    DateTime    @default(now()) @map("recorded_at") @db.Timestamptz(3)
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@index([fundId, recordedAt])
+  @@map("price_quotes")
+}
+
+/// Trilha de auditoria de alterações (fundos, operações, cotações).
+model AuditEvent {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  action     String
+  data       Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("audit_events")
 }

@@ -8,7 +8,103 @@
 | Etapa | Descrição | Status |
 | ----- | --------- | ------ |
 | 1 | Fundação e arquitetura | ✅ Concluída (2026-11-20) |
-| 2+ | Funcionalidades (a definir nos próximos prompts) | ⏳ Não iniciada |
+| 2 | Carteira, FIIs e operações financeiras | ✅ Concluída (2026-11-20) — aguardando validação do usuário |
+| 3+ | A definir nos próximos prompts | ⏳ Não iniciada |
+
+---
+
+## Etapa 2 — Carteira, FIIs e operações financeiras
+
+### Entregue
+
+- **Fundos:** cadastrar (ticker validado, nome/segmento/observações
+  opcionais), editar informações (com auditoria), pesquisar por ticker,
+  remover = **arquivar** (exige posição zerada; histórico preservado;
+  restaurável), posição individual com todas as métricas.
+- **Carteira inicial informada:** `npm run portfolio:seed -- --email …`
+  cadastra MXRF11 (31 cotas, PM R$ 8,44, cotação manual R$ 8,52) e HGLG11
+  (1 cota, PM R$ 145,00, cotação manual R$ 141,80) como **saldos iniciais sem
+  data**, sem compras inventadas, com cotações marcadas como **manuais de
+  referência**. Nome e segmento ficam "não informados" (não foram fornecidos).
+  A mesma carteira também pode ser cadastrada pela tela "Adicionar FII".
+- **Operações:** compra e venda com quantidade, preço unitário, taxas, data
+  do pregão, valor bruto e valor total/líquido; saldo inicial; prévia do
+  valor total no formulário.
+- **Cálculos** (`src/domain/portfolio`): quantidade, preço médio ponderado com
+  taxas, capital investido, valor atual, resultado realizado (por venda e
+  acumulado), resultado não realizado, rentabilidade, resultado total e
+  consolidação da carteira — tudo em Decimal (ver `FINANCIAL_RULES.md`).
+- **Histórico e integridade:** histórico com filtros (fundo, período, tipo,
+  situação); correção rastreável (nova versão + original "Corrigida" com
+  motivo); cancelamento com motivo; trilha de auditoria; nada é apagado;
+  operações e auditoria protegidas por triggers no PostgreSQL; transações
+  atômicas com lock por fundo; reprocessamento completo valida o histórico
+  (inclusive vendas retroativas).
+- **Cotações manuais:** histórico de cotações por fundo, com data de
+  referência opcional e identificação "Manual" na interface.
+- **Interface:** Painel (resumo), Carteira, Adicionar FII, Posição individual,
+  Editar/remover, Saldo inicial, Registrar operação, Histórico, Detalhe da
+  operação (corrigir/cancelar/auditoria).
+
+### Mudanças no banco (3 migrações)
+
+| Migração | Conteúdo |
+| -------- | -------- |
+| `20261120011255_portfolio_operations` | Tabelas `funds`, `operations`, `positions`, `price_quotes`, `audit_events`; enums `operation_type`, `operation_status`, `quote_source` |
+| `20261120011319_operations_integrity` | CHECKs, índice único parcial do saldo inicial, triggers de imutabilidade/não exclusão de operações e de auditoria somente-inserção |
+| `20261120011925_integrity_error_messages` | Recria as funções dos triggers com o código de erro padrão, para preservar as mensagens explicativas |
+
+### Testes executados (2026-11-20)
+
+| Verificação | Comando | Resultado |
+| ----------- | ------- | --------- |
+| TypeScript | `npm run typecheck` | ✅ sem erros |
+| ESLint | `npm run lint` | ✅ sem erros/avisos |
+| Unitários | `npm test` | ✅ 75/75 (41 novos: ledger, métricas, entrada pt-BR/validação) |
+| Integração (PostgreSQL) | `npm run test:integration` | ✅ 28/28 (18 novos: serviços da carteira) |
+| Build de produção | `npm run build` | ✅ |
+| E2E | `npm run test:e2e` | ✅ 15/15 (9 novos: fluxo da carteira e reinício do servidor) |
+| Conexão com o banco | `npm run db:check` | ✅ 4 migrações aplicadas |
+| Seed da carteira | `npm run portfolio:seed` (2×) | ✅ cria na 1ª execução, mantém na 2ª |
+| `npm audit` | | ✅ 0 vulnerabilidades |
+
+Cobertura dos testes obrigatórios: (1) cadastro de fundos, (2) compra,
+(3) venda, (4) PM após compras, (5) PM após vendas, (6) taxas, (7) realizado,
+(8) não realizado, (9) atualização da quantidade — unitários, integração e
+E2E com valores conferidos manualmente; (10) persistência — integração (nova
+conexão) e E2E (encerra o processo `next start` e sobe outro; dados e sessão
+continuam).
+
+### Problemas encontrados e soluções
+
+| Problema | Solução |
+| -------- | ------- |
+| Erro `restrict_violation` dos triggers aparecia no Prisma como "Foreign key constraint violated" | Nova migração recria as funções com o código padrão (`P0001`); a migração original não foi editada |
+| `prisma migrate reset` exige consentimento explícito do usuário | Não foi usado; a correção foi feita por migração incremental |
+| React 19 reseta formulários após o envio | `ActionForm` devolve os valores digitados e remonta os campos em caso de erro |
+| `next start` não encerra com SIGTERM com conexões keep-alive abertas (teste de reinício) | Teste encerra com SIGTERM e, se necessário, SIGKILL (simula também uma queda) |
+| Aviso do Vite sobre import sem extensão na config de integração | Import com extensão `.ts` (`allowImportingTsExtensions`) |
+
+### Pendências e limitações conhecidas
+
+- Cotações apenas manuais (integração externa é etapa futura).
+- Quantidade de cotas aceita apenas inteiros; eventos corporativos
+  (desdobramento/grupamento/amortização) não suportados.
+- Resultado realizado é gerencial — **não** é cálculo de imposto.
+- Excluir um usuário com operações é bloqueado pelos triggers (intencional).
+- Sem paginação no histórico (adequado ao volume de uso individual).
+- O ticker não pode ser alterado após o cadastro.
+- No ambiente de desenvolvimento deste projeto existe um usuário
+  `verificacao@local.dev` com a carteira inicial, criado para a verificação
+  manual; não afeta outros ambientes.
+- Pendências da Etapa 1 continuam: CSP, agendamento da limpeza de sessões,
+  troca de senha pela interface, CI.
+
+### Próxima etapa (não iniciada)
+
+Aguardando validação desta etapa. Base pronta para proventos (quantidade na
+data com via ledger), cotações automáticas (`price_quotes.source` aceita
+novas origens) e dashboard com gráficos.
 
 ---
 

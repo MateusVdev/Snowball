@@ -4,9 +4,10 @@ Plataforma privada de gerenciamento de investimentos em Fundos Imobiliários
 (FIIs): acompanhamento de carteira, monitoramento de proventos e simulador de
 reinvestimento de dividendos (efeito "bola de neve").
 
-> **Status:** Etapa 1 — fundação técnica concluída (arquitetura, banco,
-> autenticação, testes). Funcionalidades financeiras chegam nas próximas
-> etapas. Detalhes em [`DOCUMENTATION/PROJECT_STATUS.md`](DOCUMENTATION/PROJECT_STATUS.md).
+> **Status:** Etapa 2 concluída — carteira de FIIs, operações (compra,
+> venda, saldo inicial), preço médio, resultados realizado/não realizado,
+> histórico auditável. Proventos, cotações automáticas e simulador chegam nas
+> próximas etapas. Detalhes em [`DOCUMENTATION/PROJECT_STATUS.md`](DOCUMENTATION/PROJECT_STATUS.md).
 
 ## Stack
 
@@ -56,6 +57,13 @@ Crie o usuário da plataforma (a senha é pedida no terminal, sem eco; mínimo d
 npm run user:create -- --email voce@exemplo.com --name "Seu Nome"
 ```
 
+Opcional — cadastrar a carteira inicial (MXRF11 e HGLG11 como saldos
+iniciais com cotações manuais de referência; idempotente):
+
+```bash
+npm run portfolio:seed -- --email voce@exemplo.com
+```
+
 ```bash
 npm run dev
 ```
@@ -79,6 +87,7 @@ Acesse <http://localhost:3000> e entre com o usuário criado.
 | `npm run db:check`         | Testa a conexão com o PostgreSQL                        |
 | `npm run db:studio`        | Prisma Studio                                           |
 | `npm run user:create`      | Cria usuário ou redefine senha (`--reset-password`)     |
+| `npm run portfolio:seed`   | Cadastra a carteira inicial informada (`--email`)       |
 
 ## Documentação
 

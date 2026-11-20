@@ -11,4 +11,4 @@ Convenções:
   (obtido pela DAL `src/server/auth/dal.ts`, nunca do cliente) e filtra por ele.
 - Nenhum cálculo financeiro mora aqui: use `src/domain`.
 
-Vazio nesta etapa (Etapa 1 — fundação).
+Etapa 2: `portfolio/` (fundos, cotações manuais, operações e sincronização do livro-razão), `audit.ts` (trilha de auditoria) e `errors.ts` (erros de negócio com mensagem segura).

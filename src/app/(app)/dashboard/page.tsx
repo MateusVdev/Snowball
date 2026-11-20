@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
-import { Building2, Calculator, Coins, LineChart } from "lucide-react";
+import Link from "next/link";
+import { Calculator, Coins, LineChart } from "lucide-react";
+import { PageHeader, Stat } from "@/components/portfolio/page-header";
+import { Money, Percent } from "@/components/portfolio/values";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
@@ -7,52 +11,45 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { requireUser } from "@/server/auth/dal";
+import { getDb } from "@/server/db/client";
+import { getPortfolio } from "@/server/services/portfolio/fund-service";
 
 export const metadata: Metadata = { title: "Painel" };
 
-/**
- * Painel inicial (Etapa 1). Não exibe nenhum dado financeiro: os módulos
- * abaixo serão implementados nas próximas etapas.
- */
+/** Módulos ainda não implementados (próximas etapas). */
 const upcomingModules = [
-  {
-    icon: Building2,
-    title: "Carteira de FIIs",
-    description: "Cadastro de fundos, operações de compra e venda e preço médio.",
-  },
-  {
-    icon: Coins,
-    title: "Proventos",
-    description: "Registro e acompanhamento de rendimentos distribuídos.",
-  },
-  {
-    icon: LineChart,
-    title: "Cotações",
-    description: "Integração com fontes externas de preços e indicadores.",
-  },
-  {
-    icon: Calculator,
-    title: "Simulador",
-    description: "Projeção de reinvestimento de dividendos (efeito bola de neve).",
-  },
+  { icon: Coins, title: "Proventos", description: "Registro e acompanhamento de rendimentos distribuídos." },
+  { icon: LineChart, title: "Cotações automáticas", description: "Integração com fontes externas de preços e indicadores." },
+  { icon: Calculator, title: "Simulador", description: "Projeção de reinvestimento de dividendos (efeito bola de neve)." },
 ] as const;
 
 export default async function DashboardPage() {
   const user = await requireUser();
+  const { positions, totals } = await getPortfolio(getDb(), user.id);
+  const open = positions.filter((p) => !p.metrics.quantity.isZero()).length;
 
   return (
     <div className="grid gap-8">
-      <section className="grid gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Olá, {user.name}
-        </h1>
-        <p className="text-muted-foreground">
-          A fundação da plataforma está pronta. Os módulos abaixo serão
-          liberados nas próximas etapas.
-        </p>
+      <PageHeader
+        title={`Olá, ${user.name}`}
+        description={`${open} fundo(s) com posição aberta.`}
+        actions={
+          <Button asChild>
+            <Link href="/carteira">Ver carteira</Link>
+          </Button>
+        }
+      />
+
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Resumo">
+        <Stat label="Capital investido"><Money value={totals.investedCapital} /></Stat>
+        <Stat label="Valor atual" hint="Cotações manuais de referência"><Money value={totals.currentValue} /></Stat>
+        <Stat label="Resultado não realizado" hint={<Percent value={totals.unrealizedReturn} />}>
+          <Money value={totals.unrealizedResult} signed />
+        </Stat>
+        <Stat label="Resultado realizado"><Money value={totals.realizedResult} signed /></Stat>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2">
+      <section className="grid gap-4 sm:grid-cols-3">
         {upcomingModules.map(({ icon: Icon, title, description }) => (
           <Card key={title} className="opacity-80">
             <CardHeader>
@@ -61,9 +58,7 @@ export default async function DashboardPage() {
                 <CardTitle>{title}</CardTitle>
               </div>
               <CardDescription>{description}</CardDescription>
-              <span className="w-fit rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                Em breve
-              </span>
+              <span className="w-fit rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Em breve</span>
             </CardHeader>
           </Card>
         ))}

@@ -30,25 +30,38 @@ prisma.config.ts         Configuração do Prisma CLI (Prisma 7)
 scripts/
   create-user.ts         Cria o usuário / redefine senha (CLI)
   check-db.ts            Teste de conexão com o PostgreSQL
+  seed-initial-portfolio.ts  Cadastra a carteira inicial informada (idempotente)
 src/
   app/                   Rotas (App Router)
     (auth)/login/        Página e formulário de login (público)
     (app)/               Área privada — layout exige sessão válida
-      dashboard/         Painel inicial
+      dashboard/         Painel com resumo da carteira
+      carteira/          Lista de posições, novo FII, posição individual,
+                         edição/remoção (arquivamento) e saldo inicial
+      operacoes/         Histórico com filtros, nova operação e detalhe
+                         (correção, cancelamento, trilha de auditoria)
     api/health/          Health check público (sem dados sensíveis)
     layout.tsx, page.tsx Layout raiz; "/" redireciona para /dashboard
   components/
     ui/                  Componentes shadcn/ui (código copiado, editável)
     layout/              Componentes estruturais (cabeçalho etc.)
+    forms/               ActionForm/Field: formulários ligados a Server Actions
+    portfolio/           Exibição de valores, tabela de operações, prévia de operação
   domain/                Regras de negócio e cálculos PUROS (sem I/O, sem React)
-    money.ts             Decimal, escalas, arredondamento, formatação BRL
+    money.ts             Decimal, escalas, arredondamento, formatação, parse pt-BR
+    dates.ts             Datas de calendário (pregão) e fuso de São Paulo
+    portfolio/ledger.ts  Livro-razão: saldo inicial, compra, venda, PM, realizado
+    portfolio/metrics.ts Métricas da posição e consolidação da carteira
   generated/prisma/      Cliente Prisma gerado (ignorado pelo Git)
   lib/                   Utilitários genéricos de UI (cn)
   server/                Código exclusivo do servidor
     env.ts               Validação das variáveis de ambiente (Zod)
     db/                  Fábrica e instância única do Prisma
     auth/                Autenticação (ver seção abaixo)
-    services/            Serviços de aplicação (casos de uso) — próximas etapas
+    actions/             Server Actions (formulários) — validam, chamam serviços
+    services/            Serviços de aplicação (casos de uso)
+      portfolio/         fund-service, operation-service, ledger-sync
+      audit.ts, errors.ts
     integrations/        Clientes de APIs externas — próximas etapas
   validation/            Schemas Zod compartilhados (formulários, APIs)
   proxy.ts               Proxy do Next 16 (antigo middleware)
@@ -103,6 +116,29 @@ tests/
 | `users`          | Usuário da plataforma (e-mail único, nome, hash scrypt)      |
 | `sessions`       | Sessões ativas: SHA-256 do token, expiração, IP, user agent  |
 | `login_attempts` | Tentativas de login (sucesso/falha) para rate limit/auditoria |
+| `funds`          | FIIs do usuário (ticker único por usuário, nome/segmento opcionais, `archived_at`) |
+| `operations`     | Movimentações: `INITIAL_BALANCE`, `BUY`, `SELL`; status `ACTIVE`/`CANCELED`/`SUPERSEDED`; campos derivados do ledger |
+| `positions`      | Cache da posição por fundo (quantidade, custo total, realizado), regravado na mesma transação |
+| `price_quotes`   | Histórico de cotações (`source = MANUAL` nesta etapa), com data de referência opcional |
+| `audit_events`   | Trilha de auditoria somente-inserção (fundos, operações, cotações) |
+
+### Integridade da carteira
+
+- **Fonte de verdade:** operações ativas. `positions` e os campos derivados de
+  `operations` (`quantity_after`, `average_price_after`, `cost_of_sold`,
+  `realized_result`) são recalculados por `rebuildFundLedger` dentro da mesma
+  transação de cada alteração.
+- **Concorrência:** cada alteração faz `SELECT … FOR UPDATE` na linha do fundo,
+  serializando operações simultâneas no mesmo fundo.
+- **Garantias no banco** (migrações `*_operations_integrity` e
+  `*_integrity_error_messages`): CHECKs de valores positivos, data obrigatória
+  exceto no saldo inicial, motivo obrigatório para operações inativas, índice
+  único parcial (um saldo inicial ativo por fundo), trigger que impede
+  `DELETE` e alteração dos dados informados de operações, trigger que torna
+  `audit_events` somente-inserção, `ON DELETE RESTRICT` de operações para
+  fundos.
+- Consequência: excluir um usuário com operações exige manutenção manual no
+  banco (a exclusão em cascata é bloqueada pelos triggers) — intencional.
 
 ## Autenticação
 
@@ -171,9 +207,9 @@ com nonce fica como melhoria futura.
 
 | Tipo | Ferramenta | Comando | Escopo |
 | ---- | ---------- | ------- | ------ |
-| Unitário | Vitest | `npm test` | domínio, validação, senha, tokens, rate limit, redirect, env |
-| Integração | Vitest + PostgreSQL | `npm run test:integration` | conexão, migrações, serviço de autenticação completo |
-| E2E | Playwright (Chromium) | `npm run test:e2e` | login/logout reais no build de produção, proteção de rotas, atributos do cookie |
+| Unitário | Vitest | `npm test` | domínio (ledger, métricas, dinheiro, datas), validação, senha, tokens, rate limit, redirect, env |
+| Integração | Vitest + PostgreSQL | `npm run test:integration` | conexão, migrações, autenticação, serviços da carteira, transações, triggers, concorrência, persistência |
+| E2E | Playwright (Chromium) | `npm run test:e2e` | autenticação; fluxo da carteira pela interface; reinício real do servidor |
 
 Os testes de integração/E2E usam `.env.test` e recusam bancos cujo nome não
 contenha `test`, para nunca apagar dados reais.

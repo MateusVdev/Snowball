@@ -73,3 +73,53 @@ const brlFormatter = new Intl.NumberFormat("pt-BR", {
 export function formatBRL(value: DecimalInput): string {
   return brlFormatter.format(roundMoney(value).toNumber());
 }
+
+const percentFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "percent",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** Formata uma fração (0.0123) como percentual pt-BR ("1,23%"), arredondando half-up. */
+export function formatPercent(fraction: DecimalInput): string {
+  return percentFormatter.format(roundTo(toDecimal(fraction).times(100), 2).dividedBy(100).toNumber());
+}
+
+/** Formata quantidade de cotas sem zeros desnecessários ("31", "1,5"). */
+export function formatQuantity(value: DecimalInput): string {
+  const d = toDecimal(value);
+  const [intPart, fracPart] = d.toFixed().split(".");
+  const intFormatted = new Intl.NumberFormat("pt-BR").format(BigInt(intPart));
+  return fracPart ? `${intFormatted},${fracPart}` : intFormatted;
+}
+
+/** Preço unitário em reais com 2 a 8 casas (sem perder casas significativas). */
+export function formatUnitPrice(value: DecimalInput): string {
+  const d = roundTo(value, SCALE.unitPrice);
+  const decimals = Math.max(2, d.decimalPlaces());
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(d.toNumber());
+}
+
+/**
+ * Converte texto digitado (pt-BR ou ponto decimal) em string decimal canônica.
+ * Regras: com vírgula → pontos são separadores de milhar e a vírgula é decimal
+ * ("1.234,56"); sem vírgula → o ponto é decimal ("8.44"). Retorna null se inválido.
+ */
+export function parseDecimalInput(raw: string): string | null {
+  const text = raw.trim().replace(/^R\$\s*/i, "").replace(/\s/g, "");
+  if (text === "") return null;
+  let normalized: string;
+  if (text.includes(",")) {
+    if (!/^(?:-?\d{1,3}(?:\.\d{3})*|-?\d+)(?:,\d+)?$/.test(text)) return null;
+    normalized = text.replace(/\./g, "").replace(",", ".");
+  } else {
+    if (!/^-?\d+(\.\d+)?$/.test(text)) return null;
+    normalized = text;
+  }
+  return toDecimal(normalized).toFixed();
+}
