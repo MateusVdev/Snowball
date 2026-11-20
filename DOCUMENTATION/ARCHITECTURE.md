@@ -48,6 +48,8 @@ src/
                          edição/remoção (arquivamento) e saldo inicial
       operacoes/         Histórico com filtros, nova operação e detalhe
                          (correção, cancelamento, trilha de auditoria)
+      renda-fixa/        Lista de títulos, novo título, detalhe (aportes/resgates,
+                         evolução mensal) e edição/arquivamento
     api/health/          Health check público (sem dados sensíveis)
     layout.tsx, page.tsx Layout raiz; "/" redireciona para /dashboard
   components/
@@ -55,9 +57,11 @@ src/
     layout/              Componentes estruturais (cabeçalho etc.)
     forms/               ActionForm/Field: formulários ligados a Server Actions
     portfolio/           Exibição de valores, tabela de operações, prévia de operação
+    fixed-income/        Campos do título (LCI/LCA → isento) e aviso de estimativa
   domain/                Regras de negócio e cálculos PUROS (sem I/O, sem React)
     money.ts             Decimal, escalas, arredondamento, formatação, parse pt-BR
     dates.ts             Datas de calendário (pregão) e fuso de São Paulo
+    fixed-income/        Renda fixa: calendário de feriados, IR/IOF, motor de cálculo, rótulos
     portfolio/ledger.ts  Livro-razão: saldo inicial, compra, venda, PM, realizado
     portfolio/metrics.ts Métricas da posição e consolidação da carteira
     portfolio/history.ts Evolução mensal (investido × mercado), aportes, distribuição
@@ -158,6 +162,10 @@ tests/
 | `simulations`    | Simulações salvas: configuração (JSON validado por Zod) e resumo; sem referência à carteira real |
 | `simulation_versions` | Histórico de versões de cada simulação (criação, edições, restaurações) |
 | `financial_goals` | Metas: tipo (renda, patrimônio, cotas, personalizada), alvo, valor atual manual (personalizada), simulação para estimativa |
+| `fixed_income_assets` | Títulos de renda fixa do usuário: tipo (CDB, RDB, LCI, LCA, Tesouro Selic, Outro…), indexador, % do indexador, spread, isenção, liquidez, vencimento, `archived_at` |
+| `fixed_income_movements` | Aportes (valor aplicado) e resgates (valor **líquido** recebido) por título |
+| `index_daily_rates` | Cache das taxas diárias do CDI/Selic (Banco Central SGS), única por indexador + data |
+| `index_sync_status` | Última tentativa/sucesso/erro da atualização de cada indexador |
 
 ### Interface (Etapa 5)
 

@@ -17,6 +17,9 @@ import { getIntegrations } from "@/server/integrations/registry";
 import { getUserSettings } from "@/server/services/market/auto-refresh";
 import { RestoreForm } from "@/components/data/restore-form";
 import { lastSyncRuns, recentSyncRuns } from "@/server/services/market/sync-log";
+import { getIndexStatus } from "@/server/services/fixed-income/index-rate-service";
+import { refreshIndexRatesAction } from "@/server/actions/fixed-income";
+import { isoToBr } from "@/domain/fixed-income/labels";
 
 export const metadata: Metadata = { title: "Central de dados" };
 
@@ -33,7 +36,7 @@ export default async function IntegrationsPage() {
   const user = await requireUser();
   const db = getDb();
   const integrations = getIntegrations();
-  const [settings, last, runs, quoteOrigins, eventOrigins, opCount, receiptCount] = await Promise.all([
+  const [settings, last, runs, quoteOrigins, eventOrigins, opCount, receiptCount, indexStatus] = await Promise.all([
     getUserSettings(db, user.id),
     lastSyncRuns(db, user.id),
     recentSyncRuns(db, user.id),
@@ -41,6 +44,7 @@ export default async function IntegrationsPage() {
     db.dividendEvent.groupBy({ by: ["source", "kind"], where: { userId: user.id, voidedAt: null }, _count: { _all: true } }),
     db.operation.count({ where: { userId: user.id } }),
     db.dividendReceipt.count({ where: { userId: user.id, voidedAt: null } }),
+    getIndexStatus(db),
   ]);
   const count = (list: { _count: { _all: number } }[]) => list.reduce((a, x) => a + x._count._all, 0);
   const manualQuotes = count(quoteOrigins.filter((q) => q.source === "MANUAL"));
@@ -60,7 +64,7 @@ export default async function IntegrationsPage() {
         <div className="rounded-xl border bg-card p-4 text-sm"><div className="text-xs uppercase tracking-wide text-muted-foreground">Recebimentos registrados</div><div className="mt-1 text-lg font-semibold">{receiptCount}</div></div>
       </section>
       <p className="-mt-3 text-xs text-muted-foreground">
-        Origens: <strong>Manual</strong> = digitado por você · <strong>brapi</strong> = API brapi.dev · <strong>B3 FundosNET</strong> = documento oficial do administrador. A origem aparece ao lado de cada cotação e provento.
+        Origens: <strong>Manual</strong> = digitado por você · <strong>brapi</strong> = API brapi.dev · <strong>B3 FundosNET</strong> = documento oficial do administrador · <strong>Banco Central</strong> = CDI/Selic oficiais (renda fixa). A origem aparece ao lado de cada cotação e provento.
       </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -84,6 +88,33 @@ export default async function IntegrationsPage() {
                   ? "Ativo para fundos com CNPJ cadastrado. Consultas lentas de propósito (o site bloqueia rajadas)."
                   : "Desativado (FUNDOSNET_ENABLED=false)."}
               </div>
+            </div>
+            <div data-testid="provider-bcb">
+              <div className="flex flex-wrap items-center gap-2 font-medium">
+                Banco Central (CDI/Selic) — índices da renda fixa
+                {!integrations.enabled ? (
+                  <Badge variant="outline">Desativado</Badge>
+                ) : indexStatus.some((i) => i.lastError) ? (
+                  <Badge variant="destructive">Última tentativa falhou</Badge>
+                ) : indexStatus.some((i) => i.knownUntil) ? (
+                  <Badge variant="secondary">Ativo</Badge>
+                ) : (
+                  <Badge variant="outline">Aguardando primeiro título</Badge>
+                )}
+              </div>
+              <div className="text-muted-foreground">
+                API pública do SGS, sem chave. Atualizado ao abrir as telas de renda fixa (no máximo 1× por hora) ou pelo botão.
+              </div>
+              <ul className="mt-1 grid gap-0.5 text-muted-foreground">
+                {indexStatus.map((i) => (
+                  <li key={i.indexer} data-testid={`index-status-${i.indexer}`}>
+                    <strong className="text-foreground">{i.indexer === "CDI" ? "CDI" : "Selic"}:</strong>{" "}
+                    {i.knownUntil ? `taxas até ${isoToBr(i.knownUntil)}` : "nenhuma taxa guardada"}
+                    {i.lastSuccessAt ? <> · última atualização <Timestamp value={i.lastSuccessAt} /></> : null}
+                    {i.lastError ? <span className="text-destructive"> · erro: {i.lastError}</span> : null}
+                  </li>
+                ))}
+              </ul>
             </div>
             <div>
               <div className="font-medium">Atualização agendada externa</div>
@@ -110,7 +141,7 @@ export default async function IntegrationsPage() {
       {integrations.enabled ? (
         <Card>
           <CardHeader><CardTitle>Atualizar agora</CardTitle></CardHeader>
-          <CardContent className="grid gap-4 lg:grid-cols-3">
+          <CardContent className="grid gap-4 lg:grid-cols-4">
             <ActionForm action={refreshQuotesAction} submitLabel="Atualizar cotações" submitVariant="outline">
               <FormNote>Última: {last.QUOTES.last ? <Timestamp value={last.QUOTES.last.startedAt} /> : "nunca"}</FormNote>
             </ActionForm>
@@ -119,6 +150,9 @@ export default async function IntegrationsPage() {
             </ActionForm>
             <ActionForm action={refreshPriceHistoryAction} submitLabel="Importar histórico de preços" submitVariant="outline">
               <FormNote>Última: {last.PRICE_HISTORY.last ? <Timestamp value={last.PRICE_HISTORY.last.startedAt} /> : "nunca"}</FormNote>
+            </ActionForm>
+            <ActionForm action={refreshIndexRatesAction} submitLabel="Atualizar CDI/Selic" submitVariant="outline">
+              <FormNote>Índices do Banco Central para a renda fixa.</FormNote>
             </ActionForm>
           </CardContent>
         </Card>

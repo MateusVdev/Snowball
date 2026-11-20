@@ -12,6 +12,128 @@
 | 3 | Integrações financeiras e dividendos | ✅ Concluída (2026-11-20) |
 | 4 | Motor de simulação Bola de Neve | ✅ Concluída (2026-11-20) |
 | 5 | Dashboard, experiência visual e finalização | ✅ Concluída (2026-11-20) |
+| RF-1 | Renda fixa — Parte 1: modelo, índices do Banco Central, calendário e motor de cálculo | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
+| RF-2 | Renda fixa — Parte 2: telas, exportação, backup e restauração | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
+| RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída (2026-11-20) — PR aberto, sem merge |
+
+---
+
+## Renda fixa — Parte 3 (integração final)
+
+### Entregue
+
+- Visão geral: "Patrimônio total" = FIIs + renda fixa, com divisão por classe
+  de ativo (percentual, valor e barra); estrutura pronta para ações
+  (`src/domain/portfolio/asset-classes.ts`). Usuário só com renda fixa também
+  vê o painel.
+- Central de dados: status "Banco Central (CDI/Selic)" (ativo/desativado/erro,
+  taxas guardadas até, última atualização, último erro) e botão "Atualizar CDI/Selic".
+- E2E `tests/e2e/07-fixed-income.spec.ts`: cadastra a "Caixinha Turbo" (Nubank,
+  CDB, 115% do CDI, R$ 91), confere detalhe, lista, soma no dashboard, status do
+  Banco Central e exportação.
+
+### Testes executados (2026-11-20)
+
+| Comando | Resultado |
+| --- | --- |
+| `npm run check` | ✅ 237 unitários (21 arquivos) + 74 de integração (7 arquivos) |
+| `npm run build` | ✅ |
+| `npx playwright test --trace off` | ✅ 35 |
+
+### Publicação
+
+Ver o PR: aplicar `20261120151220_fixed_income` no Neon (`production`) com
+`prisma migrate deploy` (URL direta) **antes** do merge.
+
+---
+
+## Renda fixa — Parte 2 (telas, exportação, backup)
+
+### Entregue
+
+- Menu "Renda fixa" (`/renda-fixa`): resumo (aplicado, bruto, líquido,
+  rendimento do mês), lista com nome, emissor, "115% do CDI", aplicado, bruto,
+  líquido e rendimento do mês; filtro de arquivados; botão "Atualizar índices
+  do Banco Central".
+- "Adicionar título" (`/renda-fixa/novo`): LCI/LCA marcam "Isento de IR"
+  automaticamente (editável); Tesouro Selic escolhe o indexador Selic; aporte
+  inicial opcional com data aproximada.
+- Detalhe (`/renda-fixa/[id]`): posição estimada (aplicado, bruto, líquido, IR,
+  IOF, rendimento), novo aporte/resgate (resgate = valor líquido do extrato),
+  tabela de movimentos com bruto equivalente dos resgates, editar e excluir
+  (exclusão com confirmação), evolução mês a mês em gráfico (Recharts, padrão
+  do projeto) e tabela, marcação de "projeção".
+- Edição do título e arquivamento (com confirmação) / restauração.
+- Aviso fixo em todas as telas: valores estimados com base no CDI/Selic oficial
+  do Banco Central; mostra "índices atualizados até DD/MM/AAAA".
+- Índices: atualizados ao abrir as telas (no máximo 1×/hora, limite de 8 s) e
+  pelo botão.
+- Exportação ("Renda fixa", "Renda fixa — movimentos", e no "Exportar tudo"),
+  backup e restauração com renda fixa (backups antigos continuam válidos).
+- Nenhuma migração nova; nenhuma variável de ambiente nova.
+
+### Testes executados (2026-11-20)
+
+Ver o relatório da Parte 2. Novos: 5 testes de integração
+(`fixed-income-backup.test.ts`): ida e volta do backup com valores idênticos,
+backup antigo sem renda fixa, recusas (conta com renda fixa, arquivo
+adulterado, movimento órfão, tipo inválido — sem gravar nada), isolamento por
+usuário na exportação/backup e disparo da atualização de índices.
+
+### Pendente (Parte 3)
+
+Concluído na Parte 3 (ver acima).
+
+---
+
+## Renda fixa — Parte 1 (base, sem telas)
+
+Plano: `PLANO_RENDA_FIXA.md` (fornecido pelo usuário). Regras em
+`FINANCIAL_RULES.md` → "Renda fixa (pós-fixados)"; fonte em
+`INTEGRATIONS.md` → "Banco Central — SGS".
+
+### Entregue
+
+- Modelo de dados: `FixedIncomeAsset`, `FixedIncomeMovement`, `IndexDailyRate`
+  e `IndexSyncStatus` (+ enums de tipo de produto, indexador e movimento).
+- Integração Banco Central (SGS 12 = CDI, SGS 11 = Selic) com cache no banco,
+  busca incremental, divisão de janelas, timeout, `ProviderError` e respeito a
+  `INTEGRATIONS_ENABLED`.
+- Calendário de feriados nacionais calculado em código (conferido contra a
+  série do CDI de 2016 a 2026).
+- Motor de cálculo: rendimento diário por aporte, projeção com a última taxa,
+  resgates pelo **líquido recebido** convertidos em bruto equivalente (FIFO),
+  IR regressivo, IOF (todos os tipos, estimativa conservadora), isenção LCI/LCA,
+  evolução mês a mês.
+- Serviços com isolamento por usuário e auditoria: títulos (criar, editar,
+  arquivar), movimentos (adicionar, editar, excluir — com revalidação dos
+  resgates), consulta e resumo.
+- Nenhuma variável de ambiente nova.
+
+### Mudanças no banco
+
+- `20261120151220_fixed_income` — **somente aditiva** (CREATE TYPE/TABLE/INDEX
+  e CHECKs nas tabelas novas). Nenhuma tabela/coluna existente alterada;
+  migrações antigas intactas. Aplicada apenas nos bancos local e de teste.
+
+### Testes executados (2026-11-20)
+
+| Comando | Resultado |
+| --- | --- |
+| `npm run check` (typecheck, lint, unitários, integração) | ✅ 234 unitários (20 arquivos) + 68 de integração (6 arquivos) |
+| `npm run build` | ✅ |
+| `npx playwright test --trace off` (E2E existentes) | ✅ 32 |
+
+Novos: 66 unitários (calendário, IR/IOF, motor, validação, provedor BCB com API
+simulada) e 11 de integração (cache de índices: sucesso, falha, vazio,
+incremental; títulos/movimentos; resgate líquido→bruto; isolamento por usuário).
+
+### Pendente (Parte 2)
+
+Telas de renda fixa, patrimônio por classe de ativo no dashboard,
+exportação/backup/restauração incluindo renda fixa (com teste), status
+"Banco Central (CDI/Selic)" na Central de dados, disparo da atualização dos
+índices (tela/cron) e E2E da "Caixinha Turbo".
 
 ---
 

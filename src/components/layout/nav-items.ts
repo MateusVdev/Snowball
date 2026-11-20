@@ -5,6 +5,7 @@ import {
   Coins,
   Database,
   Gauge,
+  Landmark,
   Search,
   Settings,
   Snowflake,
@@ -17,6 +18,7 @@ import {
 export const NAV_ITEMS: { href: string; label: string; icon: LucideIcon; match?: string[] }[] = [
   { href: "/dashboard", label: "Visão geral", icon: Gauge },
   { href: "/carteira", label: "Minha carteira", icon: Wallet },
+  { href: "/renda-fixa", label: "Renda fixa", icon: Landmark },
   { href: "/analise", label: "Análise da carteira", icon: BarChart3 },
   { href: "/operacoes", label: "Movimentações", icon: ArrowLeftRight },
   { href: "/proventos", label: "Dividendos", icon: Coins },

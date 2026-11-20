@@ -94,7 +94,7 @@ export async function restoreBackupAction(_: FormState, formData: FormData): Pro
     const r = await restoreBackup(getDb(), user.id, raw);
     revalidatePath("/", "layout");
     return {
-      success: `Backup restaurado: ${r.funds} fundo(s), ${r.operations} operação(ões), ${r.dividendEvents} provento(s), ${r.receipts} recebimento(s), ${r.simulations} simulação(ões), ${r.goals} meta(s).`,
+      success: `Backup restaurado: ${r.funds} fundo(s), ${r.operations} operação(ões), ${r.dividendEvents} provento(s), ${r.receipts} recebimento(s), ${r.simulations} simulação(ões), ${r.goals} meta(s), ${r.fixedIncomeAssets} título(s) de renda fixa com ${r.fixedIncomeMovements} movimento(s).`,
       ts: Date.now(),
     };
   } catch (error) {

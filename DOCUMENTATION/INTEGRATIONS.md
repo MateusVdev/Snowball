@@ -103,6 +103,41 @@ Verificado em 20/11/2026:
 
 Os valores coincidem com a brapi.
 
+## Banco Central — SGS (CDI e Selic diários)
+
+Usado pela renda fixa (`src/server/integrations/bcb/sgs.ts`). Público, gratuito,
+**sem chave**.
+
+| Série | Código | URL |
+| --- | --- | --- |
+| CDI diário | 12 | `https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=DD/MM/AAAA&dataFinal=DD/MM/AAAA` |
+| Selic diária | 11 | `https://api.bcb.gov.br/dados/serie/bcdata.sgs.11/dados?formato=json&dataInicial=DD/MM/AAAA&dataFinal=DD/MM/AAAA` |
+
+Comportamento conferido na API real (2026-11-20):
+
+- Resposta: `[{"data":"02/01/2025","valor":"0.045513"}, …]` — `valor` é a taxa
+  **do dia em %** (não anual); só dias úteis.
+- Janela máxima de **10 anos** por consulta para séries diárias (acima disso:
+  HTTP 406). O provedor divide em blocos de até 5 anos.
+- Intervalo sem dados (ex.: só fim de semana, ou ainda não publicado): HTTP 404
+  com `"Value(s) not found"` — tratado como lista vazia.
+- Timeout de 15 s, 1 requisição por vez, intervalo mínimo de 0,5 s; respostas
+  validadas com Zod; falhas viram `ProviderError`.
+
+Cache (`src/server/services/fixed-income/index-rate-service.ts`):
+
+- Tabela `index_daily_rates` (única por indexador + data). Busca incremental:
+  só o que falta antes da menor e depois da maior data guardada, no máximo uma
+  vez por hora por indexador (salvo `force`). Nada é apagado nem sobrescrito.
+- `index_sync_status` guarda última tentativa, último sucesso e último erro.
+- API fora do ar: o cache continua valendo e o cálculo usa a última taxa
+  conhecida como projeção ("índices atualizados até DD/MM").
+- Respeita `INTEGRATIONS_ENABLED` (desligado = nenhuma busca).
+- Disparo: ao abrir as telas de renda fixa (`ensureIndexRates`, só desde o
+  primeiro movimento do usuário, com limite de 8 s para não travar a página) e
+  pelo botão "Atualizar índices do Banco Central" (ignora o intervalo de 1 h).
+  Sem títulos, nada é buscado.
+
 ## CVM — dados abertos (avaliada, não usada)
 
 `https://dados.cvm.gov.br/dados/FII/DOC/INF_MENSAL/` traz os informes mensais dos FIIs.
