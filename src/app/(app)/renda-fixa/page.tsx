@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { ActionForm } from "@/components/forms/action-form";
 import { EstimateNotice } from "@/components/fixed-income/estimate-notice";
+import { YieldEstimateCard } from "@/components/fixed-income/yield-estimate";
 import { PageHeader, Stat } from "@/components/portfolio/page-header";
 import { Money } from "@/components/portfolio/values";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +26,7 @@ export default async function FixedIncomePage({ searchParams }: PageProps<"/rend
   const db = getDb();
   const integrations = getIntegrations();
   await ensureIndexRates(db, integrations.indexRates, user.id, { budgetMs: 8000 });
-  const { assets, totals, ratesKnownUntil, hasProjection } = await listFixedIncomeAssets(db, user.id, { includeArchived: showArchived });
+  const { assets, totals, ratesKnownUntil, hasProjection, yieldEstimate } = await listFixedIncomeAssets(db, user.id, { includeArchived: showArchived });
 
   return (
     <div className="grid gap-6">
@@ -47,6 +48,8 @@ export default async function FixedIncomePage({ searchParams }: PageProps<"/rend
         <Stat label="Valor líquido" hint="Se resgatasse tudo hoje (após IR e IOF estimados)"><Money value={totals.net} /></Stat>
         <Stat label="Rendimento do mês" hint="Bruto, estimado"><Money value={totals.monthEarnings} signed /></Stat>
       </section>
+
+      {assets.some((a) => !a.archivedAt) ? <YieldEstimateCard estimate={yieldEstimate} title="Quanto a renda fixa rende (estimativa, total)" /> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <form className="flex items-center gap-3" action="/renda-fixa">
@@ -79,6 +82,7 @@ export default async function FixedIncomePage({ searchParams }: PageProps<"/rend
                 <TableHead className="text-right">Bruto</TableHead>
                 <TableHead className="text-right">Líquido</TableHead>
                 <TableHead className="text-right">Rendimento do mês</TableHead>
+                <TableHead className="text-right">Por dia útil (estim.)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -98,6 +102,7 @@ export default async function FixedIncomePage({ searchParams }: PageProps<"/rend
                   <TableCell className="text-right"><Money value={a.result.current.gross} /></TableCell>
                   <TableCell className="text-right"><Money value={a.result.current.net} /></TableCell>
                   <TableCell className="text-right"><Money value={a.result.monthEarnings} signed /></TableCell>
+                  <TableCell className="text-right">{a.yieldEstimate.available ? <Money value={a.yieldEstimate.perBusinessDay.gross} /> : <span className="text-muted-foreground">—</span>}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

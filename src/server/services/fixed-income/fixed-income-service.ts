@@ -8,6 +8,7 @@ import {
   type FixedIncomeResult,
 } from "@/domain/fixed-income/engine";
 import { FinDecimal, roundMoney } from "@/domain/money";
+import { estimateYield, sumYieldEstimates, type YieldEstimate } from "@/domain/fixed-income/yield-estimate";
 import {
   fixedIncomeAssetSchema,
   fixedIncomeMovementSchema,
@@ -53,19 +54,23 @@ async function ratesFor(db: Database, indexer: RateIndexer, start: IsoDate, asOf
   return rates;
 }
 
-async function compute(db: Database, asset: AssetRow, movements: FixedIncomeMovementInput[], asOf: IsoDate) {
+function termsOf(asset: AssetRow) {
+  return {
+    rate: asset.rate.toString(),
+    spreadAnnualPercent: asset.spreadAnnualPercent?.toString() ?? null,
+    taxExempt: asset.taxExempt,
+  };
+}
+
+async function computeWithRates(db: Database, asset: AssetRow, movements: FixedIncomeMovementInput[], asOf: IsoDate) {
   const indexer = supportedIndexer(asset.indexer);
   const start = movements.reduce<IsoDate>((min, m) => (m.date < min ? m.date : min), asOf);
-  return computeFixedIncome({
-    terms: {
-      rate: asset.rate.toString(),
-      spreadAnnualPercent: asset.spreadAnnualPercent?.toString() ?? null,
-      taxExempt: asset.taxExempt,
-    },
-    movements,
-    rates: await ratesFor(db, indexer, start, asOf),
-    asOf,
-  });
+  const rates = await ratesFor(db, indexer, start, asOf);
+  return { rates, result: computeFixedIncome({ terms: termsOf(asset), movements, rates, asOf }) };
+}
+
+async function compute(db: Database, asset: AssetRow, movements: FixedIncomeMovementInput[], asOf: IsoDate) {
+  return (await computeWithRates(db, asset, movements, asOf)).result;
 }
 
 /** Recusa históricos em que algum resgate supera o saldo líquido estimado. */
@@ -257,11 +262,14 @@ export interface FixedIncomeAssetView {
   archivedAt: Date | null;
   movements: { id: string; type: "DEPOSIT" | "WITHDRAWAL"; date: IsoDate; amount: string; notes: string | null }[];
   result: FixedIncomeResult;
+  /** "Quanto rende": por dia útil, mês até hoje e projeção do mês (estimativas). */
+  yieldEstimate: YieldEstimate;
 }
 
 async function toView(db: Database, asset: AssetRow, asOf: IsoDate): Promise<FixedIncomeAssetView> {
   const movements = toMovementInputs(asset.movements);
   const byId = new Map(asset.movements.map((m) => [m.id, m]));
+  const { rates, result } = await computeWithRates(db, asset, movements, asOf);
   return {
     id: asset.id,
     name: asset.name,
@@ -282,7 +290,8 @@ async function toView(db: Database, asset: AssetRow, asOf: IsoDate): Promise<Fix
       amount: String(m.amount),
       notes: byId.get(m.id)?.notes ?? null,
     })),
-    result: await compute(db, asset, movements, asOf),
+    result,
+    yieldEstimate: estimateYield({ terms: termsOf(asset), result, rates }),
   };
 }
 
@@ -304,6 +313,8 @@ export interface FixedIncomeSummary {
   /** Menor "índices atualizados até" entre os títulos com saldo (null = sem índice). */
   ratesKnownUntil: IsoDate | null;
   hasProjection: boolean;
+  /** Soma do "quanto rende" dos títulos ativos (estimativas). */
+  yieldEstimate: ReturnType<typeof sumYieldEstimates>;
 }
 
 export async function listFixedIncomeAssets(
@@ -337,7 +348,8 @@ export async function listFixedIncomeAssets(
       if (r.projectedBusinessDays > 0 || r.missingBusinessDays > 0) hasProjection = true;
     }
   }
-  return { assets, totals, ratesKnownUntil, hasProjection };
+  const yieldEstimate = sumYieldEstimates(assets.filter((a) => !a.archivedAt).map((a) => a.yieldEstimate));
+  return { assets, totals, ratesKnownUntil, hasProjection, yieldEstimate };
 }
 
 /**

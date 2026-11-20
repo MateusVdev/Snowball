@@ -14,7 +14,21 @@
 | 5 | Dashboard, experiência visual e finalização | ✅ Concluída (2026-11-20) |
 | RF-1 | Renda fixa — Parte 1: modelo, índices do Banco Central, calendário e motor de cálculo | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
 | RF-2 | Renda fixa — Parte 2: telas, exportação, backup e restauração | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
-| RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída (2026-11-20) — PR aberto, sem merge |
+| RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída e publicada (PR #2) |
+| PJ-1 | Projeções — Parte 1: quanto a renda fixa rende | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
+
+---
+
+## Projeções — Parte 1 (quanto a renda fixa rende)
+
+- Por título, no total da renda fixa e no dashboard: rendimento estimado por dia
+  útil, no mês até hoje e projeção do mês inteiro, bruto e líquido de IR, com
+  aviso de estimativa (taxa usada, sem IOF, sem aportes futuros).
+- Lista ganhou a coluna "Por dia útil (estim.)"; dashboard ganhou o card
+  "Renda fixa" (saldo bruto/líquido, aplicado e quanto rende).
+- Sem migração; sem variáveis de ambiente novas.
+- Testes: `npm run check` ✅ (247 unitários, 75 de integração), build ✅,
+  E2E ✅ 36 (novo `08-fixed-income-yield.spec.ts`).
 
 ---
 

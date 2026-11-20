@@ -17,6 +17,7 @@ import { getIntegrations } from "@/server/integrations/registry";
 import { listGoalStatuses } from "@/server/services/goals/goal-service";
 import { getOverview } from "@/server/services/overview/overview-service";
 import { ensureIndexRates } from "@/server/services/fixed-income/refresh";
+import { YieldEstimateCard } from "@/components/fixed-income/yield-estimate";
 import { formatPercent } from "@/domain/money";
 
 export const metadata: Metadata = { title: "Visão geral" };
@@ -128,6 +129,20 @@ export default async function DashboardPage() {
           <Stat label="Rentabilidade" info="Resultado não realizado ÷ capital investido (posições com cotação)."><Percent value={t.unrealizedReturn} /></Stat>
         </div>
       </section>
+
+      {o.fixedIncome.assets.length ? (
+        <YieldEstimateCard
+          estimate={o.fixedIncome.yieldEstimate}
+          testId="dashboard-fixed-income"
+          title={<span className="flex flex-wrap items-baseline justify-between gap-2">Renda fixa <Link className="text-sm font-normal underline" href="/renda-fixa">Ver títulos</Link></span>}
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Stat label="Saldo bruto (estimado)"><Money value={o.fixedIncome.totals.gross} /></Stat>
+            <Stat label="Saldo líquido (estimado)" hint="Se resgatasse tudo hoje (IR e IOF)"><Money value={o.fixedIncome.totals.net} /></Stat>
+            <Stat label="Valor aplicado"><Money value={o.fixedIncome.totals.principal} /></Stat>
+          </div>
+        </YieldEstimateCard>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

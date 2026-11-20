@@ -97,6 +97,8 @@ export interface FixedIncomeResult {
   projectedBusinessDays: number;
   /** Dias úteis sem nenhuma taxa conhecida (não renderam). */
   missingBusinessDays: number;
+  /** Aportes ainda investidos na data (FIFO), com o valor bruto de cada um. */
+  openLots: { movementId: string; date: IsoDate; principal: FinDecimal; gross: FinDecimal }[];
 }
 
 export class FixedIncomeError extends Error {
@@ -278,7 +280,7 @@ export function computeFixedIncome(input: {
     return {
       asOf, current: empty, totalDeposited: ZERO, totalWithdrawnNet: ZERO, totalWithdrawnGross: ZERO,
       accumulatedEarnings: ZERO, monthEarnings: ZERO, withdrawals: [], months: [], ratesKnownUntil: knownUntil,
-      projectedBusinessDays: 0, missingBusinessDays: 0,
+      projectedBusinessDays: 0, missingBusinessDays: 0, openLots: [],
     };
   }
 
@@ -353,5 +355,11 @@ export function computeFixedIncome(input: {
     ratesKnownUntil: idx.knownUntil,
     projectedBusinessDays: flags.projected,
     missingBusinessDays: flags.missing,
+    openLots: lots.map((lot) => ({
+      movementId: lot.movementId,
+      date: lot.date,
+      principal: lot.principal,
+      gross: lot.principal.times(idx.factor(lot.date, asOf)),
+    })),
   };
 }

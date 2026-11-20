@@ -488,3 +488,24 @@ bruto equivalente é maior que R$ 600 e o segundo aporte fica intacto.
   ações no futuro = informar o valor da classe no serviço da visão geral.
 - A meta do tipo "Patrimônio" continua considerando só os FIIs (texto da meta
   deixa isso explícito).
+
+### "Quanto rende" — rendimento estimado (`src/domain/fixed-income/yield-estimate.ts`)
+
+Estimativas a partir do **saldo bruto atual** e da **última taxa diária
+publicada** do CDI/Selic (data mostrada na tela):
+
+- **Por dia útil** = saldo bruto × (fator diário − 1), com
+  fator = 1 + taxa_do_dia% × % do título (× spread^(1/252), se houver).
+- **No mês até hoje** = rendimento bruto do mês calculado pelo motor.
+- **Projeção do mês inteiro** = até hoje + saldo × (fator^n − 1), onde n = dias
+  úteis de hoje (inclusive — o rendimento de hoje ainda não entrou) até o fim do
+  mês, pelo calendário de feriados. Com a taxa constante, a projeção é igual ao
+  que o motor calcula no 1º dia do mês seguinte (coberto por teste).
+- **Líquido de IR** = bruto × (1 − alíquota média), onde a alíquota média é a do
+  prazo atual de cada aporte ainda investido, ponderada pelo saldo bruto de cada
+  um. Isentos: líquido = bruto.
+- **Não inclui IOF** (só existe nos primeiros 29 dias de cada aporte e varia dia
+  a dia) nem aportes/resgates futuros. O saldo líquido da posição continua
+  descontando IOF.
+- Sem nenhuma taxa guardada: por dia e projeção ficam indisponíveis ("—").
+- Total da renda fixa (lista e dashboard) = soma dos títulos ativos.
