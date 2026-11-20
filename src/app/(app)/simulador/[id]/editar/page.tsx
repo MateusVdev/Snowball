@@ -6,7 +6,7 @@ import { SimulationEditor } from "@/components/simulation/simulation-editor";
 import { saveSimulationAction } from "@/server/actions/simulation";
 import { requireUser } from "@/server/auth/dal";
 import { getDb } from "@/server/db/client";
-import { getSimulation } from "@/server/services/simulation/simulation-service";
+import { getSimulation, portfolioFundOptions } from "@/server/services/simulation/simulation-service";
 
 export const metadata: Metadata = { title: "Editar simulação" };
 
@@ -23,6 +23,7 @@ export default async function EditSimulationPage({ params }: PageProps<"/simulad
         initialConfig={sim.config}
         initialName={sim.name}
         initialDescription={sim.description ?? ""}
+        portfolioFunds={await portfolioFundOptions(getDb(), user.id)}
       />
     </div>
   );

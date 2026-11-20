@@ -7,6 +7,7 @@ import {
   defaultFund,
   simulate,
   simulateScenarios,
+  applyScenario,
   type ScenarioResult,
   type SimulationConfig,
   type SimulationResult,
@@ -217,4 +218,37 @@ export async function buildConfigFromPortfolio(db: Database, userId: string, mon
     warnings,
     snapshotDate: todayIso,
   };
+}
+
+/** Duplica um cenário hipotético como nova simulação (premissas do cenário gravadas na configuração). */
+export async function createSimulationFromScenario(db: Database, userId: string, id: string, scenarioKey: string) {
+  const sim = await findOwned(db, userId, id);
+  const config = parseSimulationConfig(sim.config);
+  const scenario = config.scenarios.find((s) => s.key === scenarioKey);
+  if (!scenario) throw new ServiceError("NOT_FOUND", "Cenário não encontrado.");
+  return createSimulation(
+    db,
+    userId,
+    { name: `${sim.name} — ${scenario.label}`.slice(0, 80), description: `Criada a partir do cenário hipotético “${scenario.label}” (preço ${scenario.priceAnnualPercent}% a.a., dividendo ${scenario.dividendAnnualPercent}% a.a.).` },
+    applyScenario(config, scenario),
+    sim.origin as SimulationOrigin,
+  );
+}
+
+export interface PortfolioFundOption {
+  ticker: string;
+  quantity: string;
+  price: string;
+  monthlyDividend: string;
+  calendar: { dataComDay: number; paymentDay: number; paymentLagMonths: number } | null;
+}
+
+/** Fundos da carteira real para o seletor do editor (cópia de valores). */
+export async function portfolioFundOptions(db: Database, userId: string): Promise<PortfolioFundOption[]> {
+  try {
+    const imp = await buildConfigFromPortfolio(db, userId, 12);
+    return imp.config.funds.map((f) => ({ ticker: f.ticker, quantity: f.initialQuantity, price: f.price, monthlyDividend: f.monthlyDividend, calendar: f.calendar }));
+  } catch {
+    return [];
+  }
 }

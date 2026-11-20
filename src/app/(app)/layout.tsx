@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { AppHeader } from "@/components/layout/app-header";
+import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { requireUser } from "@/server/auth/dal";
 import { getDb } from "@/server/db/client";
 import { getIntegrations } from "@/server/integrations/registry";
@@ -22,9 +23,10 @@ export default async function PrivateLayout({
   after(() => maybeAutoRefresh(getDb(), user.id, getIntegrations()));
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="app-backdrop flex min-h-screen flex-1 flex-col lg:pl-64">
+      <SidebarNav />
       <AppHeader user={user} />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 animate-in fade-in duration-300 lg:px-8 lg:py-8">
         {children}
       </main>
     </div>

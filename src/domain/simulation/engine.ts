@@ -364,6 +364,7 @@ export function simulate(config: SimulationConfig): SimulationResult {
       initialShares: initialShares.toFixed(),
       finalShares: last.endShares,
       sharesBought: toDecimal(last.endShares).minus(initialShares).toFixed(),
+      sharesBoughtWithDividendsOnly: rows.reduce((a, r) => a.plus(r.sharesBoughtWithDividendsOnly), ZERO).toFixed(),
       totalDividendsReceived: last.cumulativeDividends,
       dividendsPendingAfterHorizon: pendingAfterHorizon.toFixed(2),
       totalReinvested: rows.reduce((a, r) => a.plus(r.reinvested), ZERO).toFixed(2),

@@ -62,6 +62,12 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
     fund.metrics.averagePrice?.toFixed() ?? null,
     todayIso,
   );
+  const lastPaid = events
+    .filter((e) => e.kind === "OFFICIAL" && e.type === "INCOME" && e.status === "PAID")
+    .sort((a, b) => b.dataCom.getTime() - a.dataCom.getTime())[0] ?? null;
+  const nextAnnounced = events
+    .filter((e) => e.status === "ANNOUNCED")
+    .sort((a, b) => (a.paymentDate?.getTime() ?? Infinity) - (b.paymentDate?.getTime() ?? Infinity))[0] ?? null;
   const pricePoints = prices.map((p) => ({
     label: formatDate(p.date).slice(0, 5),
     close: toDecimal(p.close).toNumber(), // apenas para posicionar no gráfico
@@ -147,6 +153,12 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
         <Stat label="Resultado não realizado"><Money value={m.unrealizedResult} signed /></Stat>
         <Stat label="Rentabilidade" hint="Não realizado ÷ capital investido"><Percent value={m.unrealizedReturn} /></Stat>
         <Stat label="Resultado realizado" hint="Vendas registradas"><Money value={m.realizedResult} signed /></Stat>
+        <Stat label="Último rendimento" hint={lastPaid ? <>pago em <CalendarDate value={lastPaid.paymentDate} /> · {lastPaid.competence ?? lastPaid.referenceLabel ?? ""}</> : "Nenhum rendimento oficial registrado"}>
+          <UnitPrice value={lastPaid?.ratePerShare ?? null} />
+        </Stat>
+        <Stat label="Próximo provento anunciado" hint={nextAnnounced ? <>pagamento <CalendarDate value={nextAnnounced.paymentDate} empty="a definir" />{nextAnnounced.expectedAmount ? <> · esperado <Money value={nextAnnounced.expectedAmount} /></> : null}</> : undefined}>
+          {nextAnnounced ? <UnitPrice value={nextAnnounced.ratePerShare} /> : <span className="text-base font-normal text-muted-foreground">Aguardando divulgação.</span>}
+        </Stat>
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">

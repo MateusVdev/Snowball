@@ -5,6 +5,8 @@
 
 @theme inline {
   --color-background: var(--background);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
   --color-foreground: var(--foreground);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -45,7 +47,9 @@
 }
 
 :root {
-  --radius: 0.625rem;
+  --radius: 0.75rem;
+  --positive: oklch(0.55 0.15 155);
+  --negative: oklch(0.55 0.2 25);
   /* Série única dos gráficos (paleta validada; ver skill de dataviz) */
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -87,43 +91,46 @@
 }
 
 .dark {
+  /* Bola de Neve — azul-marinho profundo, roxo e detalhes em laranja */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
-  --chart-grid: oklch(1 0 0 / 10%);
-  --chart-axis: oklch(0.708 0 0);
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --chart-grid: oklch(0.42 0.04 275 / 35%);
+  --chart-axis: oklch(0.72 0.03 270);
+  --background: oklch(0.16 0.035 268);
+  --foreground: oklch(0.96 0.01 270);
+  --card: oklch(0.205 0.045 272);
+  --card-foreground: oklch(0.96 0.01 270);
+  --popover: oklch(0.23 0.05 275);
+  --popover-foreground: oklch(0.96 0.01 270);
+  --primary: oklch(0.72 0.17 52);
+  --primary-foreground: oklch(0.18 0.03 50);
+  --secondary: oklch(0.29 0.07 290);
+  --secondary-foreground: oklch(0.95 0.02 290);
+  --muted: oklch(0.25 0.045 275);
+  --muted-foreground: oklch(0.72 0.03 270);
+  --accent: oklch(0.31 0.08 292);
+  --accent-foreground: oklch(0.97 0.01 290);
+  --destructive: oklch(0.66 0.2 22);
+  --border: oklch(0.42 0.05 280 / 40%);
+  --input: oklch(0.42 0.05 280 / 55%);
+  --ring: oklch(0.72 0.17 52 / 70%);
+  --positive: oklch(0.78 0.17 155);
+  --negative: oklch(0.7 0.19 22);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: oklch(0.14 0.045 280);
+  --sidebar-foreground: oklch(0.9 0.02 280);
+  --sidebar-primary: oklch(0.72 0.17 52);
+  --sidebar-primary-foreground: oklch(0.18 0.03 50);
+  --sidebar-accent: oklch(0.27 0.08 290);
+  --sidebar-accent-foreground: oklch(0.98 0.01 290);
+  --sidebar-border: oklch(0.42 0.05 280 / 30%);
+  --sidebar-ring: oklch(0.72 0.17 52);
 }
 
 @layer base {
@@ -132,5 +139,42 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "tnum" 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.01em;
+  }
+  /* Itens de grid podem encolher: conteúdo largo (tabelas) rola no próprio contêiner. */
+  .grid > * {
+    min-width: 0;
+  }
+}
+
+@layer components {
+  /* Fundo da área privada: brilho roxo/azul muito sutil */
+  .app-backdrop {
+    background-image:
+      radial-gradient(60rem 30rem at 85% -10%, oklch(0.35 0.12 295 / 0.25), transparent 60%),
+      radial-gradient(50rem 30rem at -10% 10%, oklch(0.35 0.1 260 / 0.22), transparent 60%);
+    background-attachment: fixed;
+  }
+  /* Card com leve gradiente e realce no hover (sem exagero) */
+  .card-elevated {
+    background-image: linear-gradient(180deg, oklch(1 0 0 / 0.025), transparent 40%);
+    transition: border-color 150ms ease, transform 150ms ease;
+  }
+  .card-elevated:hover {
+    border-color: oklch(0.72 0.17 52 / 0.35);
+  }
+  .accent-ring {
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04), 0 0 0 1px oklch(0.72 0.17 52 / 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

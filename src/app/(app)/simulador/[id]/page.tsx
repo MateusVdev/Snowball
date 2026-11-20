@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { GrowthRule, MonthResult, SimulationConfig } from "@/domain/simulation";
-import { deleteSimulationAction, duplicateSimulationAction, restoreVersionAction } from "@/server/actions/simulation";
+import { deleteSimulationAction, duplicateScenarioAction, duplicateSimulationAction, restoreVersionAction } from "@/server/actions/simulation";
+import { SelectableSeriesChart } from "@/components/simulation/selectable-series-chart";
+import { simulate, strategyVariants } from "@/domain/simulation";
+import { formatPercent, toDecimal } from "@/domain/money";
 import { requireUser } from "@/server/auth/dal";
 import { getDb } from "@/server/db/client";
 import { getSimulation, listSimulationVersions } from "@/server/services/simulation/simulation-service";
@@ -50,6 +53,7 @@ function MonthlyTable({ rows, fundKey }: { rows: MonthResult[]; fundKey: string 
             <TableHead className="text-right">Aportes</TableHead>
             <TableHead className="text-right">Dinheiro acumulado</TableHead>
             <TableHead className="text-right">Cotas compradas</TableHead>
+            <TableHead className="text-right">Só c/ dividendos</TableHead>
             <TableHead className="text-right">Cotas finais</TableHead>
             <TableHead className="text-right">Saldo restante</TableHead>
             <TableHead className="text-right">Renda mensal</TableHead>
@@ -60,8 +64,8 @@ function MonthlyTable({ rows, fundKey }: { rows: MonthResult[]; fundKey: string 
           {rows.map((r) => {
             const f = fundKey ? r.funds.find((x) => x.key === fundKey) : null;
             const v = f
-              ? { start: f.startShares, elig: f.eligibleShares, div: f.dividendsReceived, notR: f.notReinvested, contrib: f.contributions, cash: f.cashAvailable, bought: f.sharesBought, end: f.endShares, rem: f.cashRemaining, income: f.dividendsReceived, total: f.positionValue }
-              : { start: r.startShares, elig: r.eligibleShares, div: r.dividendsReceived, notR: r.notReinvested, contrib: (n(r.regularContribution) + n(r.extraContribution)).toFixed(2), cash: r.cashAvailable, bought: r.sharesBought, end: r.endShares, rem: r.cashRemaining, income: r.monthlyIncome, total: r.patrimony };
+              ? { start: f.startShares, elig: f.eligibleShares, div: f.dividendsReceived, notR: f.notReinvested, contrib: f.contributions, cash: f.cashAvailable, bought: f.sharesBought, divOnly: f.sharesBoughtWithDividendsOnly, end: f.endShares, rem: f.cashRemaining, income: f.dividendsReceived, total: f.positionValue }
+              : { start: r.startShares, elig: r.eligibleShares, div: r.dividendsReceived, notR: r.notReinvested, contrib: (n(r.regularContribution) + n(r.extraContribution)).toFixed(2), cash: r.cashAvailable, bought: r.sharesBought, divOnly: r.sharesBoughtWithDividendsOnly, end: r.endShares, rem: r.cashRemaining, income: r.monthlyIncome, total: r.patrimony };
             return (
               <TableRow key={r.month} data-testid={`sim-month-${r.month}`}>
                 <TableCell>{r.label}</TableCell>
@@ -72,6 +76,7 @@ function MonthlyTable({ rows, fundKey }: { rows: MonthResult[]; fundKey: string 
                 <TableCell className="text-right"><Money value={v.contrib} /></TableCell>
                 <TableCell className="text-right"><Money value={v.cash} /></TableCell>
                 <TableCell className="text-right tabular-nums">{v.bought}</TableCell>
+                <TableCell className={`text-right tabular-nums ${Number(v.divOnly) > 0 ? "font-semibold text-primary" : ""}`}>{v.divOnly}</TableCell>
                 <TableCell className="text-right tabular-nums">{v.end}</TableCell>
                 <TableCell className="text-right"><Money value={v.rem} /></TableCell>
                 <TableCell className="text-right"><Money value={v.income} /></TableCell>
@@ -107,15 +112,29 @@ export default async function SimulationPage({ params, searchParams }: PageProps
     contributions: n(r.regularContribution) + n(r.extraContribution),
     cash: n(r.cashRemaining),
   }));
-  const scenarioData = result.months.map((r, i) => ({
-    label: shortLabel(r),
-    ...Object.fromEntries(scenarios.map((sc) => [sc.scenario.key, n(sc.result.months[i].patrimony)])),
-  }));
-  const scenarioIncome = result.months.map((r, i) => ({
-    label: shortLabel(r),
-    ...Object.fromEntries(scenarios.map((sc) => [sc.scenario.key, n(sc.result.months[i].monthlyIncome)])),
-  }));
   const scenarioSeries = scenarios.map((sc) => ({ key: sc.scenario.key, label: sc.scenario.label }));
+  const strategies = strategyVariants(config).map((v) => ({ ...v, result: simulate(v.config) }));
+  const series4 = (list: { key: string; result: { months: MonthResult[] } }[], pickValue: (r: MonthResult) => string) =>
+    result.months.map((r, i) => ({ label: shortLabel(r), ...Object.fromEntries(list.map((x) => [x.key, n(pickValue(x.result.months[i]))])) }));
+  const scenarioWithResults = scenarios.map((sc) => ({ key: sc.scenario.key, result: sc.result }));
+  const scenarioCharts = {
+    patrimony: series4(scenarioWithResults, (r) => r.patrimony),
+    income: series4(scenarioWithResults, (r) => r.monthlyIncome),
+    shares: series4(scenarioWithResults, (r) => r.endShares),
+  };
+  const strategyCharts = {
+    patrimony: series4(strategies, (r) => r.patrimony),
+    income: series4(strategies, (r) => r.monthlyIncome),
+    shares: series4(strategies, (r) => r.endShares),
+  };
+  const METRICS = [{ key: "patrimony", label: "Patrimônio" }, { key: "income", label: "Renda mensal" }, { key: "shares", label: "Cotas" }];
+  const FORMATS = { patrimony: "brl", income: "brl", shares: "int" } as const;
+  const boughtData = result.months.map((r) => ({
+    label: shortLabel(r),
+    dividends: n(r.sharesBoughtWithDividendsOnly),
+    contributions: n(r.sharesBought) - n(r.sharesBoughtWithDividendsOnly),
+  }));
+  const divOnlyShare = toDecimal(s.sharesBought).gt(0) ? toDecimal(s.sharesBoughtWithDividendsOnly).dividedBy(s.sharesBought) : null;
 
   return (
     <div className="grid gap-6">
@@ -138,6 +157,21 @@ export default async function SimulationPage({ params, searchParams }: PageProps
           preços variam. Esta simulação não altera a sua carteira real. Motor v{result.engineVersion}, cálculo determinístico.
         </AlertDescription>
       </Alert>
+
+      <Card className="accent-ring" data-testid="dividend-only-highlight">
+        <CardContent className="flex flex-wrap items-center gap-6">
+          <div className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[oklch(0.55_0.2_300)] text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/20">
+            {s.sharesBoughtWithDividendsOnly}
+          </div>
+          <div className="grid gap-1">
+            <p className="text-lg font-semibold">cotas compradas exclusivamente com dividendos</p>
+            <p className="text-sm text-muted-foreground">
+              de {s.sharesBought} cotas compradas no prazo{divOnlyShare ? ` (${formatPercent(divOnlyShare)})` : ""}. É o efeito bola de neve:
+              dividendos comprando cotas que geram novos dividendos.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Resumo">
         <Stat label="Cotas" hint={`${s.initialShares} → ${s.finalShares} (+${s.sharesBought})`}>{s.finalShares}</Stat>
@@ -194,13 +228,17 @@ export default async function SimulationPage({ params, searchParams }: PageProps
         <Card><CardHeader><CardTitle>Renda passiva mensal</CardTitle></CardHeader><CardContent><SeriesLineChart data={data} series={[{ key: "income", label: "Renda mensal" }]} format="brl" ariaLabel="Dividendos recebidos por mês" /></CardContent></Card>
         <Card><CardHeader><CardTitle>Evolução patrimonial</CardTitle></CardHeader><CardContent><SeriesLineChart data={data} series={[{ key: "patrimony", label: "Patrimônio" }]} format="brl" ariaLabel="Patrimônio ao fim de cada mês" /></CardContent></Card>
         <Card><CardHeader><CardTitle>Dividendos × aportes</CardTitle></CardHeader><CardContent><SeriesLineChart data={data} series={[{ key: "dividends", label: "Dividendos recebidos" }, { key: "contributions", label: "Aportes" }]} format="brl" ariaLabel="Dividendos e aportes por mês" /></CardContent></Card>
+        <Card>
+          <CardHeader><CardTitle>Cotas compradas por mês</CardTitle><CardDescription>Só com dividendos × com ajuda de aportes.</CardDescription></CardHeader>
+          <CardContent><SeriesLineChart data={boughtData} series={[{ key: "dividends", label: "Só com dividendos" }, { key: "contributions", label: "Com aportes" }]} format="int" ariaLabel="Cotas compradas por mês, por origem do dinheiro" /></CardContent>
+        </Card>
         <Card><CardHeader><CardTitle>Saldo acumulado em caixa</CardTitle><CardDescription>Troco que espera para a próxima compra.</CardDescription></CardHeader><CardContent><SeriesLineChart data={data} series={[{ key: "cash", label: "Saldo" }]} format="brl" ariaLabel="Saldo em caixa ao fim de cada mês" /></CardContent></Card>
         <Card>
           <CardHeader>
-            <CardTitle>Comparação dos cenários (patrimônio)</CardTitle>
-            <CardDescription>Cenários hipotéticos; ver tabela abaixo.</CardDescription>
+            <CardTitle>Comparação dos cenários</CardTitle>
+            <CardDescription>Selecione cenários e a métrica. Hipotéticos; valores na tabela abaixo.</CardDescription>
           </CardHeader>
-          <CardContent><SeriesLineChart data={scenarioData} series={scenarioSeries} format="brl" ariaLabel="Patrimônio por cenário" /></CardContent>
+          <CardContent><SelectableSeriesChart data={scenarioCharts} series={scenarioSeries} metrics={METRICS} format={FORMATS} ariaLabel="Comparação de cenários" /></CardContent>
         </Card>
       </div>
 
@@ -224,6 +262,7 @@ export default async function SimulationPage({ params, searchParams }: PageProps
                 <TableHead className="text-right">Renda mensal final</TableHead>
                 <TableHead className="text-right">Patrimônio final</TableHead>
                 <TableHead className="text-right">Dividendos recebidos</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -235,6 +274,7 @@ export default async function SimulationPage({ params, searchParams }: PageProps
                 <TableCell className="text-right"><Money value={s.finalMonthlyIncome} /></TableCell>
                 <TableCell className="text-right"><Money value={s.finalPatrimony} /></TableCell>
                 <TableCell className="text-right"><Money value={s.totalDividendsReceived} /></TableCell>
+                <TableCell />
               </TableRow>
               {scenarios.map((sc) => (
                 <TableRow key={sc.scenario.key} data-testid={`scenario-${sc.scenario.key}`}>
@@ -245,11 +285,49 @@ export default async function SimulationPage({ params, searchParams }: PageProps
                   <TableCell className="text-right"><Money value={sc.result.summary.finalMonthlyIncome} /></TableCell>
                   <TableCell className="text-right"><Money value={sc.result.summary.finalPatrimony} /></TableCell>
                   <TableCell className="text-right"><Money value={sc.result.summary.totalDividendsReceived} /></TableCell>
+                  <TableCell>
+                    <ActionForm action={duplicateScenarioAction.bind(null, sim.id, sc.scenario.key)} submitLabel="Duplicar como simulação" submitVariant="ghost" className="gap-0">
+                      <span className="sr-only">Duplicar cenário {sc.scenario.label}</span>
+                    </ActionForm>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <SeriesLineChart data={scenarioIncome} series={scenarioSeries} format="brl" ariaLabel="Renda mensal por cenário" height={200} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Comparação de estratégias</CardTitle>
+          <CardDescription>Mesmas premissas de preço, dividendo, aportes e prazo; muda só o reinvestimento ou a distribuição.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Estratégia</TableHead>
+                <TableHead className="text-right">Cotas finais</TableHead>
+                <TableHead className="text-right">Só c/ dividendos</TableHead>
+                <TableHead className="text-right">Renda mensal final</TableHead>
+                <TableHead className="text-right">Patrimônio final</TableHead>
+                <TableHead className="text-right">Retirado (não reinvestido)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {strategies.map((v) => (
+                <TableRow key={v.key} data-testid={`strategy-${v.key}`}>
+                  <TableCell title={v.description}>{v.label}<span className="block text-xs text-muted-foreground">{v.description}</span></TableCell>
+                  <TableCell className="text-right tabular-nums">{v.result.summary.finalShares}</TableCell>
+                  <TableCell className="text-right tabular-nums">{v.result.summary.sharesBoughtWithDividendsOnly}</TableCell>
+                  <TableCell className="text-right"><Money value={v.result.summary.finalMonthlyIncome} /></TableCell>
+                  <TableCell className="text-right"><Money value={v.result.summary.finalPatrimony} /></TableCell>
+                  <TableCell className="text-right"><Money value={v.result.summary.totalNotReinvested} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <SelectableSeriesChart data={strategyCharts} series={strategies.map((v) => ({ key: v.key, label: v.label }))} metrics={METRICS} format={FORMATS} ariaLabel="Comparação de estratégias" />
         </CardContent>
       </Card>
 

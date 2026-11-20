@@ -180,3 +180,26 @@ export async function purgeExpiredAuthData(
   ]);
   return { sessions: sessions.count, attempts: attempts.count };
 }
+
+/** Confere a senha atual de um usuário (mesmo custo quando não existe). */
+export async function verifyUserPassword(db: Database, userId: string, password: string) {
+  const user = await db.user.findUnique({ where: { id: userId } });
+  const ok = await verifyPassword(password, user?.passwordHash ?? (await getDummyPasswordHash()));
+  return Boolean(user) && ok;
+}
+
+export async function listUserSessions(db: Database, userId: string, now: Date = new Date()) {
+  return db.session.findMany({
+    where: { userId, expiresAt: { gt: now } },
+    select: { id: true, tokenHash: true, createdAt: true, lastUsedAt: true, expiresAt: true, userAgent: true, ipAddress: true },
+    orderBy: { lastUsedAt: "desc" },
+  });
+}
+
+/** Encerra todas as sessões do usuário exceto a do token informado. */
+export async function revokeOtherSessions(db: Database, userId: string, currentToken: string) {
+  const r = await db.session.deleteMany({
+    where: { userId, NOT: { tokenHash: hashSessionToken(currentToken) } },
+  });
+  return r.count;
+}

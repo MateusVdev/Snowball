@@ -196,6 +196,8 @@ export interface SimulationSummary {
   initialShares: string;
   finalShares: string;
   sharesBought: string;
+  /** Cotas integralmente pagas com dinheiro de dividendos (no prazo). */
+  sharesBoughtWithDividendsOnly: string;
   totalDividendsReceived: string;
   /** Dividendos gerados com pagamento após o fim do prazo (modelo CALENDAR). */
   dividendsPendingAfterHorizon: string;

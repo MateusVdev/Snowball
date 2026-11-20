@@ -33,7 +33,7 @@ export function SeriesLineChart({
   ariaLabel,
   height = 240,
 }: {
-  data: Record<string, number | string>[];
+  data: Record<string, number | string | null>[];
   series: SeriesDef[];
   format: ValueFormat;
   ariaLabel: string;
@@ -74,15 +74,16 @@ export function SeriesLineChart({
                   <div className="rounded-md border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-sm">
                     <div className="mb-1 text-muted-foreground">{label}</div>
                     {series.map((s, i) => {
-                      const item = payload.find((p) => p.dataKey === s.key);
-                      if (!item) return null;
+                      const item = payload.find((p) => p.dataKey === s.key) ?? { value: null };
                       return (
                         <div key={s.key} className="flex items-center justify-between gap-4">
                           <span className="flex items-center gap-1.5">
                             <span aria-hidden className="inline-block size-2 rounded-full" style={{ background: COLORS[i] }} />
                             {s.label}
                           </span>
-                          <span className="font-medium tabular-nums">{fmt(Number(item.value), format)}</span>
+                          <span className="font-medium tabular-nums">
+                            {item.value === null || item.value === undefined ? "indisponível" : fmt(Number(item.value), format)}
+                          </span>
                         </div>
                       );
                     })}

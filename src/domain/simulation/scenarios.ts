@@ -39,3 +39,38 @@ export function simulateScenarios(config: SimulationConfig): ScenarioResult[] {
   const scenarios = config.scenarios.length ? config.scenarios : DEFAULT_SCENARIOS;
   return scenarios.map((scenario) => ({ scenario, result: simulate(applyScenario(config, scenario)) }));
 }
+
+export interface StrategyVariant {
+  key: "CONFIGURED" | "REINVEST_ALL" | "REINVEST_NONE" | "HIGHEST_YIELD";
+  label: string;
+  description: string;
+  config: SimulationConfig;
+}
+
+/**
+ * Estratégias comparáveis com as MESMAS premissas de preço, dividendo, aportes
+ * e prazo — muda apenas o reinvestimento ou a distribuição dos recursos.
+ */
+export function strategyVariants(config: SimulationConfig): StrategyVariant[] {
+  const withRate = (pct: "100" | "0") => ({ ...config, funds: config.funds.map((f) => ({ ...f, reinvestmentPercent: pct })) });
+  const variants: StrategyVariant[] = [
+    { key: "CONFIGURED", label: "Estratégia configurada", description: "Exatamente como definido.", config },
+    { key: "REINVEST_ALL", label: "Reinvestir 100%", description: "Todos os fundos reinvestem todos os dividendos.", config: withRate("100") },
+    { key: "REINVEST_NONE", label: "Sem reinvestir (0%)", description: "Dividendos retirados: mostra o efeito bola de neve por contraste.", config: withRate("0") },
+  ];
+  if (config.funds.length > 1 && config.allocation.mode !== "MANUAL") {
+    // Maior dividendo/preço no mês 1 (premissa do usuário); empate: ordem dos fundos.
+    const best = [...config.funds].sort((a, b) => {
+      const ya = Number(a.monthlyDividend) / Number(a.price);
+      const yb = Number(b.monthlyDividend) / Number(b.price);
+      return yb - ya;
+    })[0];
+    variants.push({
+      key: "HIGHEST_YIELD",
+      label: `Concentrar em ${best.ticker}`,
+      description: `Todo reinvestimento e aporte no fundo de maior dividendo/preço inicial (${best.ticker}).`,
+      config: { ...config, allocation: { mode: "WEIGHTS", weights: Object.fromEntries(config.funds.map((f) => [f.key, f.key === best.key ? "100" : "0"])) } },
+    });
+  }
+  return variants;
+}

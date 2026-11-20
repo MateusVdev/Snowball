@@ -33,7 +33,7 @@ export function ActionForm({
 }: {
   action: Action;
   submitLabel: string;
-  submitVariant?: "default" | "destructive" | "outline" | "secondary";
+  submitVariant?: "default" | "destructive" | "outline" | "secondary" | "ghost";
   children: ReactNode;
   className?: string;
   testId?: string;

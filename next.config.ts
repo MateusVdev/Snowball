@@ -24,6 +24,10 @@ const nextConfig: NextConfig = {
   // requisição). Cache Components fica desabilitado até haver conteúdo
   // público/cacheável que justifique — ver ARCHITECTURE.md.
   cacheComponents: false,
+  experimental: {
+    // Upload de backup (JSON) pela Server Action; abaixo do limite do proxy (10 MB).
+    serverActions: { bodySizeLimit: "8mb" },
+  },
   turbopack: {
     rules: {
       "*.css": {

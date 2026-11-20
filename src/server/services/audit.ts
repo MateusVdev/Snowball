@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 
-export type AuditEntity = "fund" | "operation" | "quote" | "dividend";
+export type AuditEntity = "fund" | "operation" | "quote" | "dividend" | "backup" | "user";
 
 /** Registra um evento na trilha de auditoria (tabela somente-inserção). */
 export async function recordAudit(

@@ -1,3 +1,4 @@
+import { InfoTip } from "@/components/ui/info-tip";
 import type { ReactNode } from "react";
 
 export function PageHeader({
@@ -20,11 +21,14 @@ export function PageHeader({
   );
 }
 
-export function Stat({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
+export function Stat({ label, children, hint, info }: { label: string; children: ReactNode; hint?: ReactNode; info?: ReactNode }) {
   return (
-    <div className="rounded-lg border bg-card p-4" data-stat={label}>
-      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{children}</div>
+    <div className="card-elevated rounded-xl border bg-card p-4" data-stat={label}>
+      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+        {info ? <InfoTip label={`Sobre: ${label}`}>{info}</InfoTip> : null}
+      </div>
+      <div className="mt-1.5 text-xl font-semibold tracking-tight">{children}</div>
       {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
     </div>
   );

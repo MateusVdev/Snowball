@@ -7,6 +7,7 @@ import { getDb } from "@/server/db/client";
 import { ServiceError } from "@/server/services/errors";
 import {
   createSimulation,
+  createSimulationFromScenario,
   deleteSimulation,
   duplicateSimulation,
   restoreSimulationVersion,
@@ -98,4 +99,16 @@ export async function restoreVersionAction(simulationId: string, versionId: stri
   }
   revalidatePath("/simulador", "layout");
   redirect(`/simulador/${simulationId}`);
+}
+
+export async function duplicateScenarioAction(simulationId: string, scenarioKey: string, _: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser();
+  let id: string;
+  try {
+    id = (await createSimulationFromScenario(getDb(), user.id, simulationId, scenarioKey)).id;
+  } catch (error) {
+    return simulationError(error, formData);
+  }
+  revalidatePath("/simulador", "layout");
+  redirect(`/simulador/${id}`);
 }

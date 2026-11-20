@@ -35,6 +35,7 @@ model User {
   dividendReceipts DividendReceipt[]
   settings         UserSettings?
   simulations      Simulation[]
+  goals            FinancialGoal[]
 
   @@map("users")
 }
@@ -435,6 +436,7 @@ model Simulation {
 
   user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   versions SimulationVersion[]
+  goals    FinancialGoal[]
 
   @@index([userId, updatedAt])
   @@map("simulations")
@@ -455,4 +457,41 @@ model SimulationVersion {
 
   @@unique([simulationId, version])
   @@map("simulation_versions")
+}
+
+// ============================================================
+// Metas financeiras (Etapa 5)
+// ============================================================
+
+enum GoalMetric {
+  /// Renda mensal recorrente (cotas atuais × último rendimento oficial pago).
+  MONTHLY_INCOME
+  /// Valor de mercado da carteira.
+  PATRIMONY
+  /// Total de cotas em carteira.
+  TOTAL_SHARES
+  /// Objetivo personalizado: valor atual informado pelo usuário.
+  CUSTOM
+
+  @@map("goal_metric")
+}
+
+model FinancialGoal {
+  id            String     @id @default(cuid())
+  userId        String     @map("user_id")
+  name          String
+  metric        GoalMetric
+  target        Decimal    @db.Decimal(20, 2)
+  /// Apenas para CUSTOM: valor atual informado manualmente.
+  customCurrent Decimal?   @map("custom_current") @db.Decimal(20, 2)
+  /// Simulação cujas premissas estimam o prazo (opcional).
+  simulationId  String?    @map("simulation_id")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  simulation Simulation? @relation(fields: [simulationId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("financial_goals")
 }

@@ -1,36 +1,17 @@
-import Link from "next/link";
-import { LogOut, Snowflake } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/server/auth/actions";
 import type { PublicUser } from "@/server/auth/service";
 
-/** Cabeçalho da área autenticada. Recebe apenas os campos públicos do usuário. */
+/** Barra superior da área autenticada (menu lateral + usuário + sair). */
 export function AppHeader({ user }: { user: PublicUser }) {
   return (
-    <header className="border-b bg-background">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-4">
-        <div className="flex items-center gap-6">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 font-semibold"
-          >
-            <Snowflake aria-hidden className="size-5" />
-            <span className="hidden sm:inline">Bola de Neve</span>
-          </Link>
-          <nav aria-label="Principal" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">Painel</Link>
-            <Link href="/carteira" className="text-muted-foreground hover:text-foreground">Carteira</Link>
-            <Link href="/operacoes" className="text-muted-foreground hover:text-foreground">Operações</Link>
-            <Link href="/proventos" className="text-muted-foreground hover:text-foreground">Proventos</Link>
-            <Link href="/simulador" className="text-muted-foreground hover:text-foreground">Simulador</Link>
-            <Link href="/integracoes" className="text-muted-foreground hover:text-foreground">Integrações</Link>
-          </nav>
-        </div>
+    <header className="sticky top-0 z-20 border-b bg-background/75 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="flex h-14 items-center justify-between gap-4 px-4 lg:px-8">
+        <span className="pl-11 text-sm font-semibold lg:hidden">Bola de Neve</span>
+        <span className="hidden lg:block" />
         <div className="flex items-center gap-3">
-          <span
-            className="hidden text-sm text-muted-foreground sm:inline"
-            data-testid="current-user"
-          >
+          <span className="hidden text-sm text-muted-foreground sm:inline" data-testid="current-user">
             {user.name}
           </span>
           <form action={logoutAction}>

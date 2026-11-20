@@ -17,7 +17,7 @@ const NA = <span className="text-muted-foreground">—</span>;
 function signClass(value: DecimalInput) {
   const d = toDecimal(value);
   if (d.isZero()) return "";
-  return d.isPositive() ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400";
+  return d.isPositive() ? "text-positive" : "text-negative";
 }
 
 export function Money({ value, signed = false }: { value: DecimalInput | null; signed?: boolean }) {

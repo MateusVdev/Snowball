@@ -21,6 +21,7 @@ import {
 } from "@/domain/simulation";
 import { parseSimulationConfig } from "@/validation/simulation";
 import type { FormState } from "@/server/actions/form-state";
+import type { PortfolioFundOption } from "@/server/services/simulation/simulation-service";
 
 /**
  * Editor de simulação. Mantém a configuração em estado local; a prévia usa o
@@ -65,17 +66,20 @@ export function SimulationEditor({
   initialName,
   initialDescription,
   warnings = [],
+  portfolioFunds = [],
 }: {
   action: Action;
   initialConfig: SimulationConfig;
   initialName: string;
   initialDescription: string;
   warnings?: string[];
+  portfolioFunds?: PortfolioFundOption[];
 }) {
   const [config, setConfig] = useState<SimulationConfig>(initialConfig);
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [state, formAction, pending] = useActionState(action, {});
+  const [pick, setPick] = useState("");
   const deferred = useDeferredValue(config);
 
   const preview = useMemo(() => {
@@ -231,9 +235,40 @@ export function SimulationEditor({
               </details>
             </fieldset>
           ))}
-          <Button type="button" variant="outline" className="w-fit" disabled={config.funds.length >= 20} onClick={() => set("funds", [...config.funds, defaultFund({ key: nextKey(), ticker: "" })])}>
-            <Plus aria-hidden /> Adicionar fundo
-          </Button>
+          <div className="flex flex-wrap items-end gap-2">
+            <Button type="button" variant="outline" disabled={config.funds.length >= 20} onClick={() => set("funds", [...config.funds, defaultFund({ key: nextKey(), ticker: "" })])}>
+              <Plus aria-hidden /> Adicionar fundo
+            </Button>
+            {portfolioFunds.length ? (
+              <>
+                <NativeSelect className="w-56" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Fundo da minha carteira">
+                  <option value="">Fundo da minha carteira…</option>
+                  {portfolioFunds.map((f) => (
+                    <option key={f.ticker} value={f.ticker} disabled={config.funds.some((x) => x.ticker === f.ticker)}>
+                      {f.ticker} · {f.quantity} cotas
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!pick || config.funds.length >= 20}
+                  onClick={() => {
+                    const f = portfolioFunds.find((x) => x.ticker === pick);
+                    if (!f) return;
+                    set("funds", [
+                      ...config.funds,
+                      defaultFund({ key: nextKey(), ticker: f.ticker, initialQuantity: f.quantity, price: f.price, monthlyDividend: f.monthlyDividend, ...(f.calendar ? { calendar: f.calendar } : {}) }),
+                    ]);
+                    setPick("");
+                  }}
+                >
+                  Adicionar da carteira
+                </Button>
+                <span className="text-xs text-muted-foreground">Copia quantidade, cotação e último rendimento — a carteira não é alterada.</span>
+              </>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 

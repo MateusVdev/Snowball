@@ -6,7 +6,7 @@ import { saveSimulationAction } from "@/server/actions/simulation";
 import { requireUser } from "@/server/auth/dal";
 import { getDb } from "@/server/db/client";
 import { ServiceError } from "@/server/services/errors";
-import { buildConfigFromPortfolio } from "@/server/services/simulation/simulation-service";
+import { buildConfigFromPortfolio, portfolioFundOptions } from "@/server/services/simulation/simulation-service";
 
 export const metadata: Metadata = { title: "Nova simulação" };
 
@@ -46,6 +46,7 @@ export default async function NewSimulationPage({ searchParams }: PageProps<"/si
         initialName={name}
         initialDescription=""
         warnings={warnings}
+        portfolioFunds={await portfolioFundOptions(getDb(), user.id)}
       />
     </div>
   );
