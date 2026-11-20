@@ -179,3 +179,38 @@ describe("exportação e isolamento por usuário", () => {
     expect(await ensureIndexRates(db, slow, userId, { force: true, budgetMs: 50 })).toEqual([]); // não trava a tela
   });
 });
+
+describe("visão geral: patrimônio por classe de ativo", () => {
+  it("total = FIIs (valor de mercado) + renda fixa (bruto estimado); arquivados fora; isolado por usuário", async () => {
+    const { getOverview } = await import("@/server/services/overview/overview-service");
+    await createFund(db, userId, { ticker: "MXRF11" }, { initialBalance: { quantity: "10", averagePrice: "10" }, quote: { price: "10.50" } });
+    const a = await createFixedIncomeAsset(db, userId, { name: "Caixinha Turbo", issuer: "Nubank", productType: "CDB", indexer: "CDI", rate: "115" });
+    await addFixedIncomeMovement(db, userId, a.id, { type: "DEPOSIT", date: "2025-03-10", amount: "91" });
+    const archived = await createFixedIncomeAsset(db, userId, { name: "Antigo", productType: "CDB", indexer: "CDI", rate: "100" });
+    await addFixedIncomeMovement(db, userId, archived.id, { type: "DEPOSIT", date: "2025-03-10", amount: "1000" });
+    await setFixedIncomeAssetArchived(db, userId, archived.id, true);
+
+    const o = await getOverview(db, userId, { todayIso: "2025-06-02" });
+    const rf = o.fixedIncome.totals.gross;
+    expect(rf.gt(91)).toBe(true); // rendeu com as taxas do cache
+    expect(o.patrimony.total?.toFixed(10)).toBe(rf.plus("105").toFixed(10));
+    expect(o.patrimony.classes.map((c) => c.key)).toEqual(["FII", "FIXED_INCOME"]);
+    expect(o.patrimony.classes[0].value?.toFixed(2)).toBe("105.00");
+    const shares = o.patrimony.classes.reduce((s, c) => s.plus(c.share!), rf.minus(rf));
+    expect(shares.toFixed(10)).toBe("1.0000000000");
+
+    // Fundo sem cotação: total indisponível, renda fixa continua visível.
+    await createFund(db, userId, { ticker: "HGLG11" }, { initialBalance: { quantity: "1", averagePrice: "150" } });
+    const incomplete = await getOverview(db, userId, { todayIso: "2025-06-02" });
+    expect(incomplete.patrimony.total).toBeNull();
+    expect(incomplete.patrimony.classes.find((c) => c.key === "FIXED_INCOME")?.value?.eq(rf)).toBe(true);
+
+    // Outro usuário só com renda fixa.
+    const other = await createUser(db, { email: "so-rf@teste.dev", name: "RF", password: "SenhaForte123" });
+    const b = await createFixedIncomeAsset(db, other.id, { name: "LCI", productType: "LCI", indexer: "CDI", rate: "90" });
+    await addFixedIncomeMovement(db, other.id, b.id, { type: "DEPOSIT", date: "2025-06-02", amount: "50" });
+    const ob = await getOverview(db, other.id, { todayIso: "2025-06-02" });
+    expect(ob.patrimony.total?.toFixed(2)).toBe("50.00");
+    expect(ob.patrimony.classes.map((c) => c.key)).toEqual(["FIXED_INCOME"]);
+  });
+});

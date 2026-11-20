@@ -475,3 +475,16 @@ bruto equivalente é maior que R$ 600 e o segundo aporte fica intacto.
 - Restauração: os campos de renda fixa são opcionais, então backups antigos
   continuam válidos. Uma conta que já tem renda fixa conta como "com dados"
   (restauração recusada). Movimentos são gravados na ordem original de registro.
+
+### Patrimônio total por classe de ativo (visão geral)
+
+- Patrimônio total = FIIs (valor de mercado pela cotação atual) + renda fixa
+  (valor **bruto** estimado dos títulos ativos — o saldo que os bancos mostram;
+  o líquido estimado aparece ao lado). Títulos arquivados ficam fora.
+- Se algum FII está sem cotação, o total fica indisponível ("—"), como antes;
+  a renda fixa continua visível na divisão por classe.
+- A divisão por classe vem de `src/domain/portfolio/asset-classes.ts`
+  (`ASSET_CLASSES`: FIIs, Renda fixa e Ações — esta ainda sem dados). Incluir
+  ações no futuro = informar o valor da classe no serviço da visão geral.
+- A meta do tipo "Patrimônio" continua considerando só os FIIs (texto da meta
+  deixa isso explícito).

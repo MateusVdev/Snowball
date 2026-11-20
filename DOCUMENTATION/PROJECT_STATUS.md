@@ -14,7 +14,36 @@
 | 5 | Dashboard, experiência visual e finalização | ✅ Concluída (2026-11-20) |
 | RF-1 | Renda fixa — Parte 1: modelo, índices do Banco Central, calendário e motor de cálculo | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
 | RF-2 | Renda fixa — Parte 2: telas, exportação, backup e restauração | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
-| RF-3 | Renda fixa — Parte 3 | ⏳ Não iniciada |
+| RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída (2026-11-20) — PR aberto, sem merge |
+
+---
+
+## Renda fixa — Parte 3 (integração final)
+
+### Entregue
+
+- Visão geral: "Patrimônio total" = FIIs + renda fixa, com divisão por classe
+  de ativo (percentual, valor e barra); estrutura pronta para ações
+  (`src/domain/portfolio/asset-classes.ts`). Usuário só com renda fixa também
+  vê o painel.
+- Central de dados: status "Banco Central (CDI/Selic)" (ativo/desativado/erro,
+  taxas guardadas até, última atualização, último erro) e botão "Atualizar CDI/Selic".
+- E2E `tests/e2e/07-fixed-income.spec.ts`: cadastra a "Caixinha Turbo" (Nubank,
+  CDB, 115% do CDI, R$ 91), confere detalhe, lista, soma no dashboard, status do
+  Banco Central e exportação.
+
+### Testes executados (2026-11-20)
+
+| Comando | Resultado |
+| --- | --- |
+| `npm run check` | ✅ 237 unitários (21 arquivos) + 74 de integração (7 arquivos) |
+| `npm run build` | ✅ |
+| `npx playwright test --trace off` | ✅ 35 |
+
+### Publicação
+
+Ver o PR: aplicar `20261120151220_fixed_income` no Neon (`production`) com
+`prisma migrate deploy` (URL direta) **antes** do merge.
 
 ---
 
@@ -53,8 +82,7 @@ usuário na exportação/backup e disparo da atualização de índices.
 
 ### Pendente (Parte 3)
 
-Patrimônio por classe de ativo no dashboard (FIIs + renda fixa), status
-"Banco Central (CDI/Selic)" na Central de dados, E2E da "Caixinha Turbo".
+Concluído na Parte 3 (ver acima).
 
 ---
 

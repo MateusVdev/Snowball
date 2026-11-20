@@ -110,7 +110,7 @@ export async function listGoalStatuses(db: Database, userId: string, overview: O
       note = "Renda mensal recorrente estimada: cotas atuais × último rendimento oficial pago (não é garantia).";
     } else if (metric === "PATRIMONY") {
       current = marketValueKnown ? overview.portfolio.totals.currentValue : null;
-      note = marketValueKnown ? "Valor de mercado atual da carteira." : "Há fundos sem cotação: patrimônio indisponível.";
+      note = marketValueKnown ? "Valor de mercado atual da carteira de FIIs (não inclui renda fixa)." : "Há fundos sem cotação: patrimônio indisponível.";
     } else if (metric === "TOTAL_SHARES") {
       current = overview.totalShares;
       note = "Total de cotas em carteira.";

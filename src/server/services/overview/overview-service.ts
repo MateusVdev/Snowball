@@ -13,6 +13,8 @@ import {
 import { getDividendsOverview, type DividendsOverview } from "../dividends/dividend-service";
 import { loadFundLedgers } from "../dividends/eligibility";
 import { getPortfolio, type PortfolioView } from "../portfolio/fund-service";
+import { listFixedIncomeAssets, type FixedIncomeSummary } from "../fixed-income/fixed-income-service";
+import { patrimonyByClass, type PatrimonyByClass } from "@/domain/portfolio/asset-classes";
 
 /**
  * Visão geral consolidada — tudo calculado a partir do banco, reaproveitando
@@ -39,6 +41,14 @@ export interface Overview {
   initialBalancesCost: FinDecimal;
   byFund: AllocationSlice[];
   bySegment: AllocationSlice[];
+  /** Renda fixa (títulos ativos), valores estimados. */
+  fixedIncome: FixedIncomeSummary;
+  /**
+   * Patrimônio total por classe de ativo: FIIs pelo valor de mercado (desconhecido
+   * se algum fundo está sem cotação) + renda fixa pelo valor BRUTO estimado
+   * (o saldo mostrado pelos bancos). Preparado para outras classes (ações).
+   */
+  patrimony: PatrimonyByClass;
 }
 
 export function recurringIncomeFrom(portfolio: PortfolioView, dividends: DividendsOverview): RecurringIncome {
@@ -75,11 +85,12 @@ export async function getOverview(
   const active = portfolio.positions.filter((p) => !p.archivedAt);
   const fundIds = portfolio.positions.map((p) => p.fundId);
 
-  const [ledgers, quotes, closes, ops] = await Promise.all([
+  const [ledgers, quotes, closes, ops, fixedIncome] = await Promise.all([
     loadFundLedgers(db, fundIds),
     db.priceQuote.findMany({ where: { fundId: { in: fundIds } }, select: { fundId: true, price: true, source: true, marketTime: true, referenceDate: true, recordedAt: true } }),
     db.dailyPrice.findMany({ where: { fundId: { in: fundIds } }, select: { fundId: true, date: true, close: true } }),
     db.operation.findMany({ where: { userId, status: "ACTIVE" }, select: { type: true, tradeDate: true, netAmount: true } }),
+    listFixedIncomeAssets(db, userId, { asOf: todayIso }),
   ]);
 
   const history = portfolioHistory(
@@ -109,5 +120,10 @@ export async function getOverview(
     initialBalancesCost: ops.filter((o) => o.type === "INITIAL_BALANCE").reduce((a, o) => a.plus(toDecimal(o.netAmount.toString())), new FinDecimal(0)),
     byFund: allocation(active.map((p) => ({ key: p.fundId, label: p.ticker, value: positionValue(p) }))),
     bySegment: allocation(active.map((p) => ({ key: p.segment ?? "—", label: p.segment ?? "Segmento não informado", value: positionValue(p) }))),
+    fixedIncome,
+    patrimony: patrimonyByClass([
+      { key: "FII", value: portfolio.totals.positionsWithoutQuote > 0 ? null : portfolio.totals.currentValue, note: "Valor de mercado" },
+      { key: "FIXED_INCOME", value: fixedIncome.totals.gross, note: "Valor bruto estimado" },
+    ]),
   };
 }
