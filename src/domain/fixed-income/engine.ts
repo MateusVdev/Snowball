@@ -110,7 +110,7 @@ export class FixedIncomeError extends Error {
 
 const ZERO = new FinDecimal(0);
 
-interface Lot {
+export interface Lot {
   movementId: string;
   date: IsoDate;
   principal: FinDecimal;
@@ -206,7 +206,8 @@ function lotAt(lot: Lot, date: IsoDate, idx: DailyIndex, taxExempt: boolean) {
   return { gross, iof, incomeTax, net: gross.minus(iof).minus(incomeTax) };
 }
 
-function valueLots(lots: readonly Lot[], date: IsoDate, idx: DailyIndex, taxExempt: boolean): Valuation {
+/** Valor bruto, tributos e líquido de um conjunto de aportes na data `date`. */
+export function valueLots(lots: readonly Lot[], date: IsoDate, idx: DailyIndex, taxExempt: boolean): Valuation {
   let principal = ZERO;
   let gross = ZERO;
   let iof = ZERO;

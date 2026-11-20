@@ -16,6 +16,21 @@
 | RF-2 | Renda fixa — Parte 2: telas, exportação, backup e restauração | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
 | RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída e publicada (PR #2) |
 | PJ-1 | Projeções — Parte 1: quanto a renda fixa rende | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
+| PJ-2 | Projeções — Parte 2: simulador de renda fixa com aportes | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
+
+---
+
+## Projeções — Parte 2 (simulador de renda fixa)
+
+- `/renda-fixa/simulador`: valor inicial (saldo atual), aporte mensal, prazo em
+  meses/anos, % do CDI ou taxa anual, CDI anual estimado (CDI atual do Banco
+  Central), isenção de IR selecionável; resultado mês a mês (aplicado,
+  rendimento, IR, líquido) em gráfico e tabela; salvar, abrir, editar e excluir.
+- **Migração `20261120173124_fixed_income_simulations`** — somente aditiva (cria
+  a tabela `fixed_income_simulations`, índice e FK). Aplicar no Neon antes do merge.
+- Backup/restauração e exportação incluem as simulações de renda fixa
+  (backups antigos continuam válidos).
+- Sem variáveis de ambiente novas.
 
 ---
 

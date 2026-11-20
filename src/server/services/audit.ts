@@ -8,7 +8,8 @@ export type AuditEntity =
   | "backup"
   | "user"
   | "fixed_income_asset"
-  | "fixed_income_movement";
+  | "fixed_income_movement"
+  | "fixed_income_simulation";
 
 /** Registra um evento na trilha de auditoria (tabela somente-inserção). */
 export async function recordAudit(

@@ -27,16 +27,17 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions          Session[]
-  funds             Fund[]
-  operations        Operation[]
-  auditEvents       AuditEvent[]
-  dividendEvents    DividendEvent[]
-  dividendReceipts  DividendReceipt[]
-  settings          UserSettings?
-  simulations       Simulation[]
-  goals             FinancialGoal[]
-  fixedIncomeAssets FixedIncomeAsset[]
+  sessions               Session[]
+  funds                  Fund[]
+  operations             Operation[]
+  auditEvents            AuditEvent[]
+  dividendEvents         DividendEvent[]
+  dividendReceipts       DividendReceipt[]
+  settings               UserSettings?
+  simulations            Simulation[]
+  goals                  FinancialGoal[]
+  fixedIncomeAssets      FixedIncomeAsset[]
+  fixedIncomeSimulations FixedIncomeSimulation[]
 
   @@map("users")
 }
@@ -605,4 +606,22 @@ model IndexSyncStatus {
   updatedAt     DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("index_sync_status")
+}
+
+/// Simulação de renda fixa com aportes mensais (independente da carteira real).
+model FixedIncomeSimulation {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  /// Parâmetros validados por Zod (valor inicial, aporte, prazo, rentabilidade, CDI, isenção).
+  config    Json
+  /// Resumo do último cálculo (para listagens).
+  summary   Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("fixed_income_simulations")
 }

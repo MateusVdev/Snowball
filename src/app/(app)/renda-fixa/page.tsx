@@ -34,9 +34,14 @@ export default async function FixedIncomePage({ searchParams }: PageProps<"/rend
         title="Renda fixa"
         description="CDBs, caixinhas, LCI/LCA e Tesouro Selic, com valor estimado pelo CDI/Selic."
         actions={
-          <Button asChild>
-            <Link href="/renda-fixa/novo"><Plus aria-hidden /> Adicionar título</Link>
-          </Button>
+          <>
+            <Button asChild variant="outline">
+              <Link href="/renda-fixa/simulador">Simular com aportes</Link>
+            </Button>
+            <Button asChild>
+              <Link href="/renda-fixa/novo"><Plus aria-hidden /> Adicionar título</Link>
+            </Button>
+          </>
         }
       />
 

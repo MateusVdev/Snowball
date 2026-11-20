@@ -509,3 +509,22 @@ publicada** do CDI/Selic (data mostrada na tela):
   descontando IOF.
 - Sem nenhuma taxa guardada: por dia e projeção ficam indisponíveis ("—").
 - Total da renda fixa (lista e dashboard) = soma dos títulos ativos.
+
+### Simulador de renda fixa (`src/domain/fixed-income/simulation.ts`)
+
+Simulação hipotética com aportes mensais, reaproveitando o motor (DailyIndex,
+IR regressivo e IOF por aporte, calendário de dias úteis):
+
+- Indexador anual → taxa diária constante: d = (1 + a)^(1/252) − 1, aplicada só
+  em dias úteis. "% do CDI": fator = 1 + d_CDI × %; "taxa anual fixa": fator = 1 + d_taxa.
+- CDI anual pré-preenchido = última taxa diária do CDI (Banco Central)
+  anualizada: (1 + d)^252 − 1 (ex.: 0,055131% ao dia ≈ 14,90% a.a.). Editável.
+- Valor inicial pré-preenchido com o saldo bruto atual da renda fixa. Editável.
+- Valor inicial na data de início; aporte mensal no início de cada mês (mês 1
+  inclusive), no mesmo dia do mês (ou último dia do mês), passando para o próximo
+  dia útil em fim de semana/feriado. Total aplicado = inicial + meses × aporte.
+- Mês k termina em início + k meses; a posição considera os aportes feitos antes
+  dessa data. Valor líquido = bruto − IR − IOF, como se resgatasse tudo no fim do mês.
+- Isenção de IR selecionável (LCI/LCA). Prazo máximo: 360 meses.
+- Simulações salvas guardam os parâmetros e a data de início (resultado
+  reproduzível); entram no backup/restauração e na exportação.
