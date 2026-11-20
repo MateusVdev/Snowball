@@ -11,7 +11,7 @@
 
 export interface ProviderInfo {
   /** Identificador estável (gravado no banco como origem). */
-  id: "BRAPI" | "B3_FUNDOSNET";
+  id: "BRAPI" | "B3_FUNDOSNET" | "BCB";
   name: string;
 }
 
@@ -73,6 +73,7 @@ export interface DividendQuery {
 }
 
 export interface DividendProvider extends ProviderInfo {
+  id: "BRAPI" | "B3_FUNDOSNET";
   /** true quando o provedor exige CNPJ (o fundo precisa tê-lo cadastrado). */
   requiresCnpj: boolean;
   getDividends(query: DividendQuery): Promise<DividendData[]>;
@@ -91,4 +92,17 @@ export interface AssetInformation {
 
 export interface AssetInformationProvider extends ProviderInfo {
   getAssetInfo(ticker: string): Promise<AssetInformation>;
+}
+
+export interface IndexDailyRateData {
+  /** Dia útil (formato AAAA-MM-DD). */
+  date: string;
+  /** Taxa do dia em % (string decimal ≥ 0; ex.: "0.055131"). */
+  dailyRatePercent: string;
+}
+
+export interface IndexRateProvider extends ProviderInfo {
+  id: "BCB";
+  /** Taxas diárias publicadas entre `from` e `to` (inclusive, AAAA-MM-DD). Lista vazia se não houver. */
+  getDailyRates(indexer: "CDI" | "SELIC", from: string, to: string): Promise<IndexDailyRateData[]>;
 }

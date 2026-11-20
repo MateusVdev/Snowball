@@ -158,6 +158,10 @@ tests/
 | `simulations`    | Simulações salvas: configuração (JSON validado por Zod) e resumo; sem referência à carteira real |
 | `simulation_versions` | Histórico de versões de cada simulação (criação, edições, restaurações) |
 | `financial_goals` | Metas: tipo (renda, patrimônio, cotas, personalizada), alvo, valor atual manual (personalizada), simulação para estimativa |
+| `fixed_income_assets` | Títulos de renda fixa do usuário: tipo (CDB, RDB, LCI, LCA, Tesouro Selic, Outro…), indexador, % do indexador, spread, isenção, liquidez, vencimento, `archived_at` |
+| `fixed_income_movements` | Aportes (valor aplicado) e resgates (valor **líquido** recebido) por título |
+| `index_daily_rates` | Cache das taxas diárias do CDI/Selic (Banco Central SGS), única por indexador + data |
+| `index_sync_status` | Última tentativa/sucesso/erro da atualização de cada indexador |
 
 ### Interface (Etapa 5)
 

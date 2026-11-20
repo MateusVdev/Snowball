@@ -12,6 +12,59 @@
 | 3 | Integrações financeiras e dividendos | ✅ Concluída (2026-11-20) |
 | 4 | Motor de simulação Bola de Neve | ✅ Concluída (2026-11-20) |
 | 5 | Dashboard, experiência visual e finalização | ✅ Concluída (2026-11-20) |
+| RF-1 | Renda fixa — Parte 1: modelo, índices do Banco Central, calendário e motor de cálculo | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
+| RF-2 | Renda fixa — Parte 2: telas, dashboard por classe, exportação/backup/restauração | ⏳ Não iniciada |
+
+---
+
+## Renda fixa — Parte 1 (base, sem telas)
+
+Plano: `PLANO_RENDA_FIXA.md` (fornecido pelo usuário). Regras em
+`FINANCIAL_RULES.md` → "Renda fixa (pós-fixados)"; fonte em
+`INTEGRATIONS.md` → "Banco Central — SGS".
+
+### Entregue
+
+- Modelo de dados: `FixedIncomeAsset`, `FixedIncomeMovement`, `IndexDailyRate`
+  e `IndexSyncStatus` (+ enums de tipo de produto, indexador e movimento).
+- Integração Banco Central (SGS 12 = CDI, SGS 11 = Selic) com cache no banco,
+  busca incremental, divisão de janelas, timeout, `ProviderError` e respeito a
+  `INTEGRATIONS_ENABLED`.
+- Calendário de feriados nacionais calculado em código (conferido contra a
+  série do CDI de 2016 a 2026).
+- Motor de cálculo: rendimento diário por aporte, projeção com a última taxa,
+  resgates pelo **líquido recebido** convertidos em bruto equivalente (FIFO),
+  IR regressivo, IOF (todos os tipos, estimativa conservadora), isenção LCI/LCA,
+  evolução mês a mês.
+- Serviços com isolamento por usuário e auditoria: títulos (criar, editar,
+  arquivar), movimentos (adicionar, editar, excluir — com revalidação dos
+  resgates), consulta e resumo.
+- Nenhuma variável de ambiente nova.
+
+### Mudanças no banco
+
+- `20261120151220_fixed_income` — **somente aditiva** (CREATE TYPE/TABLE/INDEX
+  e CHECKs nas tabelas novas). Nenhuma tabela/coluna existente alterada;
+  migrações antigas intactas. Aplicada apenas nos bancos local e de teste.
+
+### Testes executados (2026-11-20)
+
+| Comando | Resultado |
+| --- | --- |
+| `npm run check` (typecheck, lint, unitários, integração) | ✅ 234 unitários (20 arquivos) + 68 de integração (6 arquivos) |
+| `npm run build` | ✅ |
+| `npx playwright test --trace off` (E2E existentes) | ✅ 32 |
+
+Novos: 66 unitários (calendário, IR/IOF, motor, validação, provedor BCB com API
+simulada) e 11 de integração (cache de índices: sucesso, falha, vazio,
+incremental; títulos/movimentos; resgate líquido→bruto; isolamento por usuário).
+
+### Pendente (Parte 2)
+
+Telas de renda fixa, patrimônio por classe de ativo no dashboard,
+exportação/backup/restauração incluindo renda fixa (com teste), status
+"Banco Central (CDI/Selic)" na Central de dados, disparo da atualização dos
+índices (tela/cron) e E2E da "Caixinha Turbo".
 
 ---
 

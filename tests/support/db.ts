@@ -9,6 +9,6 @@ export function createTestDb(): Database {
 /** Limpa todas as tabelas de domínio (mantém o histórico de migrações). */
 export async function resetDatabase(db: Database) {
   await db.$executeRawUnsafe(
-    'TRUNCATE TABLE "financial_goals", "simulation_versions", "simulations", "sync_runs", "user_settings", "dividend_receipts", "dividend_events", "daily_prices", "audit_events", "price_quotes", "positions", "operations", "funds", "login_attempts", "sessions", "users" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "fixed_income_movements", "fixed_income_assets", "index_daily_rates", "index_sync_status", "financial_goals", "simulation_versions", "simulations", "sync_runs", "user_settings", "dividend_receipts", "dividend_events", "daily_prices", "audit_events", "price_quotes", "positions", "operations", "funds", "login_attempts", "sessions", "users" RESTART IDENTITY CASCADE',
   );
 }

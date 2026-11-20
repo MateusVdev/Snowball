@@ -249,6 +249,10 @@ cálculo de imposto. Antes de implementar, cada regra deve ser validada em
 fonte oficial (Receita Federal / legislação vigente), com a referência
 registrada neste documento.
 
+> Exceção: para a **renda fixa** há uma estimativa de IR regressivo e IOF —
+> ver "Renda fixa (pós-fixados)" abaixo. Também é estimativa, não substitui o
+> informe do banco.
+
 ## Simulador "Bola de Neve" (Etapa 4)
 
 Motor puro e determinístico em `src/domain/simulation` (versão `ENGINE_VERSION` = 1.0.0).
@@ -362,3 +366,101 @@ Em 12 meses: 108 cotas, saldo R$ 0,80 e patrimônio R$ 1.080,80. A primeira comp
 - Sem eventos corporativos.
 - Sem dias úteis/feriados no calendário.
 - Preços são premissas: a simulação não usa séries históricas nem gera valores aleatórios.
+
+## Renda fixa (pós-fixados) — Parte 1
+
+Código: `src/domain/fixed-income/` (`calendar.ts`, `taxes.ts`, `engine.ts`),
+funções puras com `FinDecimal` (nunca `number` para dinheiro ou taxa).
+**Todos os valores são estimativas**: o valor exato pode variar no app do banco.
+
+### Escopo
+
+- CDB, RDB, "caixinhas", LCI, LCA e "Outro" indexados a % do **CDI**;
+  Tesouro Selic indexado à **Selic** (sem marcação a mercado; spread/ágio anual
+  opcional). PREFIXADO/TESOURO_IPCA e os indexadores PRE/IPCA existem no banco
+  (preparação da fase 2), mas a validação ainda não os aceita.
+- LCI/LCA são isentas de IR por padrão (`taxExempt`, editável).
+
+### Rendimento bruto (por aporte)
+
+```
+fator_dia = 1 + (taxa_dia_% / 100) × (rate / 100)            [× (1 + spread/100)^(1/252)]
+valor     = aporte × Π fator_dia   (dias úteis d com data_aporte ≤ d < data_cálculo)
+```
+
+- **Convenção de datas:** rende a partir da data do aporte (inclusive) até a data
+  de cálculo (exclusive). Um aporte feito hoje vale exatamente o aportado hoje e
+  rende o primeiro dia amanhã — o comportamento comum de CDB de liquidez diária.
+- **Dias úteis:** calendário nacional calculado em código (`calendar.ts`): fixos
+  01/01, 21/04, 01/05, 07/09, 12/10, 02/11, 15/11, 25/12; 20/11 a partir de 2024
+  (Lei 14.759/2023); Carnaval (segunda e terça), Sexta-feira Santa e Corpus
+  Christi a partir da Páscoa. Conferido: os dias úteis de 2016 a 2026 coincidem
+  exatamente com as datas publicadas na série do CDI (SGS 12).
+- **Taxa ainda não publicada** (dias úteis recentes ou lacunas): usa a última
+  taxa conhecida e o resultado é marcado como **projeção** (`projectedBusinessDays`,
+  `ratesKnownUntil` = "índices atualizados até").
+- **Sem nenhuma taxa conhecida** antes do dia: o dia não rende e é sinalizado
+  (`missingBusinessDays`).
+
+### Tributos (estimativa, por aporte)
+
+Prazo = dias corridos da data do aporte até a data do resgate (ou da avaliação).
+
+| Prazo | IR regressivo |
+| --- | --- |
+| até 180 dias | 22,5% |
+| 181 a 360 dias | 20% |
+| 361 a 720 dias | 17,5% |
+| acima de 720 dias | 15% |
+
+- **IOF** (Decreto 6.306/2007, tabela regressiva oficial completa): sobre o
+  rendimento de resgates com menos de 30 dias (dia 1 = 96%, dia 15 = 50%,
+  dia 29 = 3%, dia 30 em diante = 0%). Incide **antes** do IR: o IR é calculado
+  sobre (rendimento − IOF).
+- O IOF é aplicado a **todos os tipos**, inclusive LCI/LCA e Tesouro Selic —
+  **estimativa conservadora** (decisão do usuário): na prática a cobrança pode
+  variar por produto/emissor, e o efeito só existe nos primeiros 29 dias.
+- `taxExempt = true` (LCI/LCA): sem IR.
+- Rendimento ≤ 0 não gera tributo.
+
+### Resgates: o usuário informa o LÍQUIDO RECEBIDO
+
+O valor do resgate gravado (`fixed_income_movements.amount` com `type = WITHDRAWAL`)
+é o **líquido recebido** — o que aparece no extrato do banco. O sistema calcula
+o **bruto equivalente**:
+
+1. Movimentos são processados por data; no mesmo dia, aportes antes de resgates
+   (e depois a ordem de registro).
+2. Os aportes ainda investidos são consumidos do **mais antigo para o mais novo
+   (FIFO)** — estimativa padrão; a regra real pode variar por emissor.
+3. Para cada aporte, calcula-se o que ele daria se resgatado inteiro na data:
+   `bruto`, `IOF`, `IR` e `líquido = bruto − IOF − IR` (com o prazo **daquele**
+   aporte).
+4. Enquanto o líquido pedido for maior ou igual ao líquido do aporte, o aporte
+   é consumido inteiro. No último, consome-se a fração
+   `f = líquido restante ÷ líquido do aporte`; o aporte continua investido com
+   `(1 − f)` do valor aplicado.
+5. Bruto equivalente = soma dos brutos consumidos (`f × bruto`); idem para valor
+   aplicado consumido, IOF e IR. Por construção, `bruto − IOF − IR = líquido informado`.
+6. Se o líquido pedido for maior que o saldo líquido estimado, sobra um
+   **excesso**. Até `max(R$ 1,00; 1% do resgate)` a diferença é atribuída à
+   estimativa e o resgate é tratado como **resgate total** (o título zera).
+   Acima disso, o serviço **recusa** o resgate (nada é gravado). A mesma
+   conferência é feita ao editar/excluir movimentos ou mudar taxa/isenção do
+   título — uma alteração que deixe algum resgate sem saldo é recusada.
+
+Exemplo (teste `fixed-income-engine.test.ts`): R$ 1.000 em 02/01/2024 e R$ 500 em
+02/01/2025, 100% do CDI com 0,04% ao dia; resgate de R$ 600 líquidos em
+10/03/2025. Só o primeiro aporte é consumido (433 dias → IR 17,5%, sem IOF); o
+bruto equivalente é maior que R$ 600 e o segundo aporte fica intacto.
+
+### Saídas por título
+
+- **Valor aplicado** (ainda investido), total aportado, total resgatado (líquido
+  e bruto equivalente).
+- **Bruto**, **IOF**, **IR** e **líquido** estimados "se resgatar tudo na data".
+- **Rendimento no mês** = bruto_fim − bruto_início − aportes + resgates brutos.
+- **Rendimento acumulado** = bruto atual + resgates brutos − aportes.
+- **Evolução mês a mês**: posição no 1º dia do mês seguinte (ou na data de
+  cálculo, no mês corrente), com aportes, resgates e sinalização de projeção.
+  A soma dos rendimentos mensais é igual ao acumulado.

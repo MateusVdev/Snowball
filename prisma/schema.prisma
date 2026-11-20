@@ -27,15 +27,16 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions         Session[]
-  funds            Fund[]
-  operations       Operation[]
-  auditEvents      AuditEvent[]
-  dividendEvents   DividendEvent[]
-  dividendReceipts DividendReceipt[]
-  settings         UserSettings?
-  simulations      Simulation[]
-  goals            FinancialGoal[]
+  sessions          Session[]
+  funds             Fund[]
+  operations        Operation[]
+  auditEvents       AuditEvent[]
+  dividendEvents    DividendEvent[]
+  dividendReceipts  DividendReceipt[]
+  settings          UserSettings?
+  simulations       Simulation[]
+  goals             FinancialGoal[]
+  fixedIncomeAssets FixedIncomeAsset[]
 
   @@map("users")
 }
@@ -494,4 +495,114 @@ model FinancialGoal {
 
   @@index([userId])
   @@map("financial_goals")
+}
+
+// ============================================================
+// Renda fixa (Renda fixa — Parte 1). Tabelas e enums NOVOS (migração aditiva).
+// ============================================================
+
+enum FixedIncomeProductType {
+  CDB
+  RDB
+  LCI
+  LCA
+  TESOURO_SELIC
+  OUTRO
+  /// Reservado para a fase 2 (ainda não aceito pela validação).
+  PREFIXADO
+  /// Reservado para a fase 2 (ainda não aceito pela validação).
+  TESOURO_IPCA
+
+  @@map("fixed_income_product_type")
+}
+
+enum FixedIncomeIndexer {
+  CDI
+  SELIC
+  /// Reservado para a fase 2.
+  PRE
+  /// Reservado para a fase 2.
+  IPCA
+
+  @@map("fixed_income_indexer")
+}
+
+enum FixedIncomeMovementType {
+  /// Aporte: `amount` = valor aplicado.
+  DEPOSIT
+  /// Resgate: `amount` = valor LÍQUIDO recebido (o do extrato). O bruto
+  /// equivalente é calculado pelo motor (ver FINANCIAL_RULES.md).
+  WITHDRAWAL
+
+  @@map("fixed_income_movement_type")
+}
+
+/// Título de renda fixa / caixinha.
+model FixedIncomeAsset {
+  id                  String                 @id @default(cuid())
+  userId              String                 @map("user_id")
+  name                String
+  issuer              String?
+  productType         FixedIncomeProductType @map("product_type")
+  indexer             FixedIncomeIndexer
+  /// Percentual do indexador (115 = 115% do CDI).
+  rate                Decimal                @db.Decimal(10, 4)
+  /// Taxa adicional ao ano (ex.: Tesouro Selic + x% a.a.; IPCA+ na fase 2). Opcional.
+  spreadAnnualPercent Decimal?               @map("spread_annual_percent") @db.Decimal(10, 4)
+  taxExempt           Boolean                @map("tax_exempt")
+  dailyLiquidity      Boolean                @map("daily_liquidity")
+  maturityDate        DateTime?              @map("maturity_date") @db.Date
+  notes               String?
+  archivedAt          DateTime?              @map("archived_at") @db.Timestamptz(3)
+  createdAt           DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movements FixedIncomeMovement[]
+
+  @@index([userId])
+  @@map("fixed_income_assets")
+}
+
+/// Aporte ou resgate de um título.
+model FixedIncomeMovement {
+  id        String                  @id @default(cuid())
+  userId    String                  @map("user_id")
+  assetId   String                  @map("asset_id")
+  type      FixedIncomeMovementType
+  date      DateTime                @db.Date
+  /// Aporte: valor aplicado. Resgate: valor líquido recebido.
+  amount    Decimal                 @db.Decimal(18, 2)
+  notes     String?
+  createdAt DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  asset FixedIncomeAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, date])
+  @@index([userId])
+  @@map("fixed_income_movements")
+}
+
+/// Cache das taxas diárias do Banco Central (SGS). Um registro por índice e dia útil.
+model IndexDailyRate {
+  indexer          FixedIncomeIndexer
+  date             DateTime           @db.Date
+  /// Taxa do dia em % (ex.: 0.055131), como publicada na série SGS.
+  dailyRatePercent Decimal            @map("daily_rate_percent") @db.Decimal(14, 8)
+  fetchedAt        DateTime           @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  @@id([indexer, date])
+  @@map("index_daily_rates")
+}
+
+/// Situação da atualização de cada índice (última tentativa, sucesso e erro).
+model IndexSyncStatus {
+  indexer       FixedIncomeIndexer @id
+  lastAttemptAt DateTime?          @map("last_attempt_at") @db.Timestamptz(3)
+  lastSuccessAt DateTime?          @map("last_success_at") @db.Timestamptz(3)
+  lastError     String?            @map("last_error")
+  updatedAt     DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("index_sync_status")
 }

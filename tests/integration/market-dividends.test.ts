@@ -308,7 +308,7 @@ describe("atualização automática configurável", () => {
     await seed();
     const price = fakePriceProvider(async (t) => quote(t, "8.56", "2030-01-02T20:00:00Z"));
     const integrations = {
-      enabled: true, price, dividends: [fakeDividendProvider({})], assetInfo: null,
+      enabled: true, price, dividends: [fakeDividendProvider({})], assetInfo: null, indexRates: null,
       quoteCache: new TtlCache<QuoteData>(), quoteCacheTtlMs: 0, staleAfterBusinessHours: 24,
       status: { brapiApiKey: false, brapiDailyCloseFallback: true, fundosNetEnabled: false, cronConfigured: false },
     } satisfies Integrations;
