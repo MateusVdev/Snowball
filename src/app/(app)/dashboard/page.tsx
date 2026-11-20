@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Calculator, Coins, LineChart } from "lucide-react";
+import { Coins, LineChart } from "lucide-react";
 import { PageHeader, Stat } from "@/components/portfolio/page-header";
 import { Money, Percent } from "@/components/portfolio/values";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,6 @@ export const metadata: Metadata = { title: "Painel" };
 const upcomingModules = [
   { icon: Coins, title: "Proventos", description: "Registro e acompanhamento de rendimentos distribuídos." },
   { icon: LineChart, title: "Cotações automáticas", description: "Integração com fontes externas de preços e indicadores." },
-  { icon: Calculator, title: "Simulador", description: "Projeção de reinvestimento de dividendos (efeito bola de neve)." },
 ] as const;
 
 export default async function DashboardPage() {

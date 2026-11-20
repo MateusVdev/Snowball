@@ -26,7 +26,7 @@ e para os testes que a verificam.
 | Dividend yield 12m e yield on cost | ✅ Etapa 3 | `src/domain/dividends.ts` | idem |
 | Cotação atual e desatualizada | ✅ Etapa 3 | `src/domain/quotes.ts`, `fund-service.ts` | `tests/unit/quote-freshness.test.ts`, integração |
 | Eventos corporativos (desdobramento, grupamento, amortização) | ⏳ A definir | — | — |
-| Simulador de reinvestimento | ⏳ A definir na etapa do simulador | — | — |
+| Simulador de reinvestimento (mensal e calendário, cenários, marcos) | ✅ Etapa 4 | `src/domain/simulation/` | `tests/unit/simulation.test.ts`, integração, E2E |
 | Tributação | ⚠️ Validar em fonte oficial antes de implementar | — | — |
 
 ## Precisão e arredondamento
@@ -249,9 +249,116 @@ cálculo de imposto. Antes de implementar, cada regra deve ser validada em
 fonte oficial (Receita Federal / legislação vigente), com a referência
 registrada neste documento.
 
-## Simulador de reinvestimento
+## Simulador "Bola de Neve" (Etapa 4)
 
-Premissas (taxa de reinvestimento, crescimento de proventos, aportes, preço de
-compra) serão sempre **parâmetros informados pelo usuário** e exibidos junto ao
-resultado, deixando claro que se trata de projeção e não de promessa de
-rentabilidade. Regras detalhadas serão definidas na etapa do simulador.
+Motor puro e determinístico em `src/domain/simulation` (versão `ENGINE_VERSION` = 1.0.0).
+Testes: `tests/unit/simulation.test.ts`, `tests/integration/simulation-service.test.ts` e `tests/e2e/05-simulator.spec.ts`.
+
+> Toda simulação é **hipotética**. Dividendos não são garantidos, preços variam,
+> e o resultado decorre apenas das premissas informadas. A simulação **nunca**
+> altera a carteira real: a importação copia os valores do dia para uma
+> configuração separada.
+
+### Premissas (definidas pelo usuário)
+
+| Premissa | Opções |
+| -------- | ------ |
+| Fundos participantes | até 20 fundos, cada um com quantidade inicial, preço e dividendo mensal por cota próprios |
+| Variação de preço/dividendo (por fundo) | constante (**padrão**); % ao mês composto; % ao ano (aplicado nos meses 13, 25, …); alterações pontuais "a partir do mês X, valor Y" (a variação recomeça da nova base) |
+| Reinvestimento (por fundo) | 100%, 75%, 50%, 25% ou 0% |
+| Aportes | saldo inicial, aporte mensal e aportes extraordinários (mês, valor, destino opcional) |
+| Distribuição dos recursos | ver tabela abaixo |
+| Prazo | 1 a 600 meses |
+| Modelo de tempo | mensal simplificado ou calendário |
+
+Nenhum crescimento é presumido: tudo começa constante.
+
+| Estratégia | Dividendos reinvestidos | Aportes |
+| ---------- | ----------------------- | ------- |
+| Mesmo fundo | voltam ao fundo que os gerou | divididos por percentual (ou em partes iguais) |
+| Por percentual | divididos por percentual (100% em um fundo = "fundo específico") | divididos por percentual |
+| Escolha manual | vão para um caixa comum | vão para o caixa comum; só se compram as cotas planejadas (mês, fundo, quantidade), se houver saldo |
+
+### Modelo mensal simplificado (padrão)
+
+Para cada mês `m` e cada fundo `i`:
+
+```
+preço_i(m)       = round2(base × (1 + taxa)^n)            (n conforme a regra de variação)
+dividendo_i(m)   = round8(base × (1 + taxa)^n)
+elegíveis_i(m)   = cotas_i no INÍCIO do mês m
+dividendos_i(m)  = round2(elegíveis_i(m) × dividendo_i(m))   (recebidos no próprio mês)
+reinvestido_i(m) = round2(dividendos_i(m) × %reinvestimento_i)
+à parte_i(m)     = dividendos_i(m) − reinvestido_i(m)
+caixa            = saldo anterior + reinvestido + aportes (conforme a estratégia)
+compradas_i(m)   = ⌊caixa_i ÷ preço_i(m)⌋                  (somente cotas inteiras, no FIM do mês)
+saldo            = caixa − compradas × preço               (nunca descartado; segue para m+1)
+cotas_i(m+1)     = cotas_i(m) + compradas_i(m)
+```
+
+- **Premissa documentada:** cotas compradas no mês `m` só geram dividendos a partir do mês `m+1`. Não há dividendo retroativo.
+- **Renda mensal** = dividendos recebidos no mês.
+- **Renda passiva futura** = Σ round2(cotas finais × dividendo do mês seguinte).
+- **Patrimônio** = Σ cotas finais × preço do mês + caixa. O valor "à parte" (não reinvestido) é considerado retirado e fica fora do patrimônio; é contabilizado separadamente.
+- O saldo inicial entra como aporte antes do mês 1.
+- O caixa é sempre um número exato de centavos. Divisões por percentual truncam em centavos e distribuem os centavos restantes às maiores frações (empate: ordem dos fundos); a soma das partes é sempre igual ao total.
+
+### Modelo calendário (opcional)
+
+Usado quando há datas de pagamento e data-com. Para cada fundo informam-se:
+
+- dia da data-com (1–28);
+- dia do pagamento (1–28);
+- defasagem em meses entre a data-com e o pagamento.
+
+Também se define o dia das compras e dos aportes. Dentro de cada mês, os eventos seguem a ordem dos dias; em empate, a ordem é pagamento → compra/aporte → data-com.
+
+- **Data-com:** gera `round2(cotas naquele momento × dividendo do mês)`, a ser pago no mês `m + defasagem`. O que cair depois do prazo aparece como "a receber após o prazo".
+- **Pagamento:** o valor entra no caixa, aplicando o % de reinvestimento.
+- **Compra:** usa o caixa disponível naquele dia. Uma cota comprada **antes ou no dia** da data-com tem direito ao provento do mês; comprada depois, só na data-com seguinte.
+- Opção "cotas iniciais já tinham direito às datas-com anteriores ao mês 1": gera os pagamentos dos primeiros meses quando a defasagem é ≥ 1.
+- Dias de 1 a 28 evitam meses curtos. Dias úteis e feriados não são modelados.
+
+### Marcos (primeiro mês em que ocorrem)
+
+| Marco | Regra |
+| ----- | ----- |
+| Primeira cota comprada só com dividendos | primeira cota integralmente paga com dinheiro de dividendos. Nas compras, o dinheiro de dividendos é usado antes do dinheiro de aportes |
+| Primeira compra de 2, 5 e 10 cotas | cotas compradas no mês ≥ N (somando os fundos) |
+| Dividendos superiores ao aporte mensal | dividendos recebidos > aporte mensal regular. Sem aporte mensal: "não se aplica" |
+| R$ 50, R$ 100, R$ 500 e R$ 1.000 de renda mensal | dividendos recebidos no mês ≥ valor |
+| Objetivos personalizados | renda mensal, total de cotas, patrimônio ou dividendos acumulados ≥ meta |
+
+### Cenários hipotéticos
+
+Cada cenário substitui a variação de **todos** os fundos por taxas **anuais**; as alterações pontuais são mantidas. Os valores padrão são ilustrativos e editáveis, não projeções.
+
+| Cenário | Preço | Dividendo |
+| ------- | ----- | --------- |
+| Referência | constante | constante |
+| Conservador | 0% a.a. | −2% a.a. |
+| Moderado | +2% a.a. | +2% a.a. |
+| Otimista | +4% a.a. | +4% a.a. |
+
+Taxas anuais só passam a valer no mês 13. Em prazos de até 12 meses, os cenários coincidem com a referência.
+
+### Exemplo validado — 96 cotas
+
+Premissas: 96 cotas, preço R$ 10,00, dividendo R$ 0,10, sem aporte, 100% reinvestido, cotas inteiras.
+
+| Mês | Cotas elegíveis | Dividendos | Caixa | Compra | Cotas finais | Saldo |
+| --- | --------------- | ---------- | ----- | ------ | ------------ | ----- |
+| 1 | 96 | 9,60 | 9,60 | 0 | 96 | 9,60 |
+| 2 | 96 | 9,60 | 19,20 | 1 | 97 | 9,20 |
+| 3 | 97 | 9,70 | 18,90 | 1 | 98 | 8,90 |
+| 4 | 98 | 9,80 | 18,70 | 1 | 99 | 8,70 |
+
+Em 12 meses: 108 cotas, saldo R$ 0,80 e patrimônio R$ 1.080,80. A primeira compra de 2 cotas ocorre no mês 11, com caixa de R$ 20,10.
+
+### Limitações conhecidas
+
+- Sem custos de corretagem/emolumentos nas compras simuladas.
+- Sem impostos.
+- Sem eventos corporativos.
+- Sem dias úteis/feriados no calendário.
+- Preços são premissas: a simulação não usa séries históricas nem gera valores aleatórios.

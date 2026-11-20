@@ -54,6 +54,13 @@ src/
     portfolio/metrics.ts Métricas da posição e consolidação da carteira
     dividends.ts         Elegibilidade na data-com, status, renda, DY, competência
     quotes.ts            Atualidade da cotação (horas úteis)
+    simulation/          Motor "Bola de Neve" (puro, determinístico)
+      types.ts           Configuração, premissas e resultados
+      assumptions.ts     Trajetórias de preço/dividendo; divisão exata por pesos
+      engine.ts          Cálculo mês a mês (mensal simplificado e calendário)
+      milestones.ts      Marcos e objetivos
+      scenarios.ts       Cenários hipotéticos (referência, conservador, moderado, otimista)
+      defaults.ts        Configurações padrão e exemplo das 96 cotas
   generated/prisma/      Cliente Prisma gerado (ignorado pelo Git)
   lib/                   Utilitários genéricos de UI (cn)
   server/                Código exclusivo do servidor
@@ -65,6 +72,7 @@ src/
       portfolio/         fund-service, operation-service, ledger-sync
       market/            cotações, histórico, dados cadastrais, sync-log, auto-refresh
       dividends/         eventos, recebimentos, elegibilidade, importação
+      simulation/        salvar/editar (versões)/duplicar/excluir; importar CÓPIA da carteira
     integrations/        Provedores externos (ver INTEGRATIONS.md)
       types.ts           PriceProvider, DividendProvider, AssetInformationProvider
       brapi/, b3/        Implementações (brapi; B3 FundosNET)
@@ -134,6 +142,8 @@ tests/
 | `dividend_receipts` | Recebimentos registrados: quantidade elegível (histórico ou manual), valor total |
 | `sync_runs`      | Registro de cada atualização (tipo, provedor, gatilho, status, detalhes) |
 | `user_settings`  | Atualização automática (ligada, intervalos) |
+| `simulations`    | Simulações salvas: configuração (JSON validado por Zod) e resumo; sem referência à carteira real |
+| `simulation_versions` | Histórico de versões de cada simulação (criação, edições, restaurações) |
 
 ### Integridade da carteira
 

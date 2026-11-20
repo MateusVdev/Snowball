@@ -48,6 +48,9 @@
   --radius: 0.625rem;
   /* Série única dos gráficos (paleta validada; ver skill de dataviz) */
   --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
   --chart-grid: oklch(0.922 0 0);
   --chart-axis: oklch(0.556 0 0);
   --background: oklch(1 0 0);
@@ -85,6 +88,9 @@
 
 .dark {
   --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
   --chart-grid: oklch(1 0 0 / 10%);
   --chart-axis: oklch(0.708 0 0);
   --background: oklch(0.145 0 0);

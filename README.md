@@ -4,9 +4,10 @@ Plataforma privada de gerenciamento de investimentos em Fundos Imobiliários
 (FIIs): acompanhamento de carteira, monitoramento de proventos e simulador de
 reinvestimento de dividendos (efeito "bola de neve").
 
-> **Status:** Etapa 3 concluída — carteira e operações (Etapa 2), cotações
-> automáticas (brapi), proventos (brapi + avisos oficiais da B3 FundosNET),
-> histórico de renda e dividend yield. Simulador e dashboard nas próximas etapas. Detalhes em [`DOCUMENTATION/PROJECT_STATUS.md`](DOCUMENTATION/PROJECT_STATUS.md).
+> **Status:** Etapa 4 concluída — carteira e operações, cotações automáticas,
+> proventos e o **simulador Bola de Neve** (reinvestimento mês a mês, vários
+> fundos, cenários hipotéticos, marcos, gráficos). Detalhes em
+> [`DOCUMENTATION/PROJECT_STATUS.md`](DOCUMENTATION/PROJECT_STATUS.md).
 
 ## Stack
 

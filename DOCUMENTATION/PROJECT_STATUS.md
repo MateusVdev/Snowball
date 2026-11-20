@@ -9,8 +9,88 @@
 | ----- | --------- | ------ |
 | 1 | Fundação e arquitetura | ✅ Concluída (2026-11-20) |
 | 2 | Carteira, FIIs e operações financeiras | ✅ Concluída (2026-11-20) |
-| 3 | Integrações financeiras e dividendos | ✅ Concluída (2026-11-20) — aguardando validação do usuário |
-| 4+ | A definir nos próximos prompts | ⏳ Não iniciada |
+| 3 | Integrações financeiras e dividendos | ✅ Concluída (2026-11-20) |
+| 4 | Motor de simulação Bola de Neve | ✅ Concluída (2026-11-20) — aguardando validação do usuário |
+| 5 | A definir no próximo prompt | ⏳ Não iniciada |
+
+---
+
+## Etapa 4 — Motor de simulação Bola de Neve
+
+### Entregue
+
+- **Motor puro e determinístico** (`src/domain/simulation`):
+  - camadas separadas: configuração, premissas, cálculo mês a mês, resultados mensais e acumulados, marcos e cenários;
+  - Decimal em tudo, caixa em centavos exatos, sem aleatoriedade.
+- **Modelos de tempo:**
+  - **mensal simplificado** (padrão): cotas compradas no mês só rendem a partir do mês seguinte (premissa documentada);
+  - **calendário**: data-com, pagamento e defasagem por fundo; dia de compra configurável.
+- **Premissas:**
+  - vários fundos, cada um com quantidade, preço, dividendo, variação (constante, mensal, anual) e alterações pontuais;
+  - reinvestimento por fundo (100/75/50/25/0%), com a parte não reinvestida contabilizada à parte;
+  - saldo inicial, aporte mensal e aportes extraordinários com destino opcional.
+- **Distribuição dos recursos:** mesmo fundo, percentuais (inclui "fundo específico") ou escolha manual com caixa comum. Somente cotas inteiras; o troco nunca é descartado.
+- **Marcos:** 1ª cota só com dividendos; 1ª compra de 2, 5 e 10 cotas; dividendos acima do aporte; R$ 50, 100, 500 e 1.000 de renda; objetivos personalizados.
+- **Cenários hipotéticos** (referência constante, conservador, moderado e otimista) com premissas editáveis.
+- **Persistência separada da carteira:**
+  - salvar, editar (com histórico de versões e restauração), duplicar e excluir;
+  - importar a carteira real como **cópia**, com avisos quando falta cotação ou dividendo.
+- **Interface:**
+  - lista de simulações;
+  - editor com prévia instantânea (mesmo schema e mesmo motor do servidor);
+  - resultados com resumo, premissas, marcos, tabela mensal (consolidada e por fundo) e comparação de cenários (gráfico + tabela);
+  - 6 gráficos: cotas, renda passiva, patrimônio, dividendos × aportes, saldo acumulado e cenários. Paleta validada pela checagem automática de cores; tabela com os mesmos dados.
+
+### Mudanças no banco
+
+| Migração | Conteúdo |
+| -------- | -------- |
+| `…_simulations` | Tabelas `simulations` e `simulation_versions` (configuração JSON, resumo, versão do motor), sem chaves para tabelas da carteira |
+
+### Testes executados (2026-11-20)
+
+| Verificação | Resultado |
+| ----------- | --------- |
+| TypeScript, ESLint, build, `npm audit` | ✅ |
+| Unitários | ✅ 157/157 (40 novos do simulador) |
+| Integração (PostgreSQL) | ✅ 51/51 (6 novos: ciclo completo, validação, isolamento entre usuários, persistência, importação, **isolamento da carteira real**) |
+| E2E | ✅ 22/22 (3 novos: exemplo das 96 cotas pela interface, edição/versões/duplicar/excluir, importação sem alterar a carteira) |
+
+Os testes obrigatórios estão cobertos:
+
+| Tema | Cobertura |
+| ---- | --------- |
+| Exemplo das 96 cotas (meses 1–4, valor a valor) | ✅ |
+| Saldo acumulado | ✅ |
+| Cotas inteiras | ✅ |
+| Reinvestimento integral e parcial | ✅ 100/75/50/25/0% |
+| Sem aportes e com aportes extraordinários | ✅ |
+| Alteração de preços e de dividendos | ✅ |
+| Vários fundos | ✅ 4 estratégias |
+| Elegibilidade | ✅ mensal e calendário, antes/depois da data-com |
+| Marcos | ✅ |
+| Prazos diferentes | ✅ o prazo maior estende o menor sem alterá-lo |
+| Isolamento da carteira real | ✅ fotografia completa das tabelas da carteira idêntica antes/depois |
+
+### Problemas encontrados e soluções
+
+| Problema | Solução |
+| -------- | ------- |
+| Um teste esperava patrimônio de R$ 1.968,80 | Era erro na conta manual do teste (97 × 20 + 8,80 = 1.948,80); o motor estava certo e o teste foi corrigido |
+| Mensagem de erro duplicada em formulários com erro por campo | Restaurado o comportamento anterior; o simulador mostra a primeira mensagem do Zod |
+| Cenários iguais à referência em prazos ≤ 12 meses | Comportamento correto (taxa anual vale a partir do mês 13), agora explicado na tela |
+
+### Limitações
+
+- Sem custos de compra (corretagem/emolumentos), impostos ou eventos corporativos.
+- Calendário sem dias úteis/feriados (dias 1–28).
+- Preços e dividendos são premissas; o motor não usa séries históricas nem aleatoriedade.
+- A importação da carteira usa o último rendimento oficial pago como dividendo mensal. Fundos sem histórico recebem 0, com aviso.
+- O "patrimônio" exclui o valor não reinvestido (considerado retirado).
+
+### Próxima etapa (não iniciada)
+
+Aguardando validação do simulador.
 
 ---
 

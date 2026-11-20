@@ -34,6 +34,7 @@ model User {
   dividendEvents   DividendEvent[]
   dividendReceipts DividendReceipt[]
   settings         UserSettings?
+  simulations      Simulation[]
 
   @@map("users")
 }
@@ -409,4 +410,49 @@ model UserSettings {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+// ============================================================
+// Simulador (Etapa 4) — totalmente separado da carteira real
+// ============================================================
+
+/// Simulação salva. Guarda apenas a CONFIGURAÇÃO (premissas); os resultados
+/// são recalculados de forma determinística pelo motor. Nunca referencia
+/// operações/posições reais: a importação da carteira copia valores.
+model Simulation {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  name          String
+  description   String?
+  /// Origem: "MANUAL" (independente) ou "PORTFOLIO" (cópia da carteira real na data).
+  origin        String
+  config        Json
+  engineVersion String   @map("engine_version")
+  /// Resumo do último cálculo (para listagens).
+  summary       Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions SimulationVersion[]
+
+  @@index([userId, updatedAt])
+  @@map("simulations")
+}
+
+/// Histórico de versões de uma simulação (cada vez que é salva).
+model SimulationVersion {
+  id            String   @id @default(cuid())
+  simulationId  String   @map("simulation_id")
+  version       Int
+  config        Json
+  engineVersion String   @map("engine_version")
+  summary       Json?
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  simulation Simulation @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+
+  @@unique([simulationId, version])
+  @@map("simulation_versions")
 }

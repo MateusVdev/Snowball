@@ -33,7 +33,7 @@ export function errorState(error: unknown, formData: FormData): FormState {
     const flat = z.flattenError(error);
     return {
       ...base,
-      error: flat.formErrors[0] ?? "Verifique os campos destacados.",
+      error: flat.formErrors[0] ?? (Object.keys(flat.fieldErrors).length ? "Verifique os campos destacados." : error.issues[0]?.message ?? "Dados inválidos."),
       fieldErrors: flat.fieldErrors as Record<string, string[]>,
     };
   }

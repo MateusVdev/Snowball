@@ -17,11 +17,12 @@ export function AppHeader({ user }: { user: PublicUser }) {
             <Snowflake aria-hidden className="size-5" />
             <span className="hidden sm:inline">Bola de Neve</span>
           </Link>
-          <nav aria-label="Principal" className="flex items-center gap-4 text-sm">
+          <nav aria-label="Principal" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">Painel</Link>
             <Link href="/carteira" className="text-muted-foreground hover:text-foreground">Carteira</Link>
             <Link href="/operacoes" className="text-muted-foreground hover:text-foreground">Operações</Link>
             <Link href="/proventos" className="text-muted-foreground hover:text-foreground">Proventos</Link>
+            <Link href="/simulador" className="text-muted-foreground hover:text-foreground">Simulador</Link>
             <Link href="/integracoes" className="text-muted-foreground hover:text-foreground">Integrações</Link>
           </nav>
         </div>
