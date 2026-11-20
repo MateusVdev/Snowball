@@ -1,0 +1,497 @@
+// Bola de Neve — schema do banco de dados (PostgreSQL)
+//
+// Convenções (ver DOCUMENTATION/ARCHITECTURE.md e FINANCIAL_RULES.md):
+// - Modelos em PascalCase singular; tabelas em snake_case plural via @@map.
+// - Campos em camelCase; colunas em snake_case via @map.
+// - IDs: cuid() em texto.
+// - Datas sempre em UTC (timestamptz).
+// - Valores monetários/quantidades: NUNCA Float. Usar Decimal (NUMERIC) com
+//   precisão explícita (ver FINANCIAL_RULES.md, seção "Precisão").
+// - Toda entidade de domínio pertence a um usuário (userId) e é removida em cascata.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  /// Hash scrypt no formato "scrypt$N$r$p$salt$hash". Nunca armazenar senha em texto puro.
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions         Session[]
+  funds            Fund[]
+  operations       Operation[]
+  auditEvents      AuditEvent[]
+  dividendEvents   DividendEvent[]
+  dividendReceipts DividendReceipt[]
+  settings         UserSettings?
+  simulations      Simulation[]
+  goals            FinancialGoal[]
+
+  @@map("users")
+}
+
+/// Sessão server-side. O cookie contém um token aleatório; aqui guardamos apenas o SHA-256 dele.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique @map("token_hash")
+  userId     String   @map("user_id")
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  userAgent  String?  @map("user_agent")
+  ipAddress  String?  @map("ip_address")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Registro de tentativas de login, usado para limitar força bruta e para auditoria.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  /// E-mail normalizado (minúsculas) informado na tentativa — pode não existir em users.
+  email     String
+  ipAddress String?  @map("ip_address")
+  success   Boolean
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("login_attempts")
+}
+
+// ============================================================
+// Carteira (Etapa 2)
+// ============================================================
+
+/// Fundo imobiliário acompanhado pelo usuário.
+/// Nunca é apagado: "remover" = arquivar (archivedAt), preservando o histórico.
+model Fund {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  /// Código de negociação em maiúsculas (ex.: MXRF11). Único por usuário.
+  ticker     String
+  /// Opcional: não é preenchido automaticamente para não inventar informação.
+  name       String?
+  segment    String?
+  /// CNPJ (somente dígitos). Necessário para consultar documentos oficiais (B3 FundosNET).
+  cnpj       String?
+  notes      String?
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operations       Operation[]
+  quotes           PriceQuote[]
+  position         Position?
+  dailyPrices      DailyPrice[]
+  dividendEvents   DividendEvent[]
+  dividendReceipts DividendReceipt[]
+
+  @@unique([userId, ticker])
+  @@map("funds")
+}
+
+enum OperationType {
+  /// Saldo inicial informado pelo usuário (quantidade + preço médio), sem data inventada.
+  INITIAL_BALANCE
+  BUY
+  SELL
+
+  @@map("operation_type")
+}
+
+enum OperationStatus {
+  ACTIVE
+  /// Cancelada pelo usuário (com motivo). Não entra no cálculo da posição.
+  CANCELED
+  /// Substituída por uma correção (ver correctedBy). Não entra no cálculo.
+  SUPERSEDED
+
+  @@map("operation_status")
+}
+
+/// Movimentação de cotas. Os dados informados são IMUTÁVEIS: correções criam
+/// uma nova operação e marcam a anterior como SUPERSEDED.
+model Operation {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id")
+  fundId      String          @map("fund_id")
+  type        OperationType
+  status      OperationStatus @default(ACTIVE)
+  /// Data do pregão. Nula apenas para INITIAL_BALANCE (data não informada).
+  tradeDate   DateTime?       @map("trade_date") @db.Date
+  /// Desempate entre operações da mesma data (ordem de registro). Correções herdam o da original.
+  sequence    Int             @default(autoincrement())
+  quantity    Decimal         @db.Decimal(18, 8)
+  /// Preço por cota (no saldo inicial: o preço médio informado).
+  unitPrice   Decimal         @map("unit_price") @db.Decimal(18, 8)
+  fees        Decimal         @default(0) @db.Decimal(18, 2)
+  /// Valor bruto: quantidade × preço (arredondado a centavos em BUY/SELL).
+  grossAmount Decimal         @map("gross_amount") @db.Decimal(18, 2)
+  /// Compra: bruto + taxas. Venda: bruto − taxas. Saldo inicial: custo informado.
+  netAmount   Decimal         @map("net_amount") @db.Decimal(18, 2)
+  notes       String?
+
+  // ---- Campos derivados (recalculados a cada alteração do fundo; nulos se inativa) ----
+  quantityAfter     Decimal? @map("quantity_after") @db.Decimal(18, 8)
+  averagePriceAfter Decimal? @map("average_price_after") @db.Decimal(18, 8)
+  /// Vendas: custo das cotas vendidas pelo preço médio anterior.
+  costOfSold        Decimal? @map("cost_of_sold") @db.Decimal(18, 2)
+  /// Vendas: resultado realizado (valor líquido − custo das cotas vendidas).
+  realizedResult    Decimal? @map("realized_result") @db.Decimal(18, 2)
+
+  // ---- Rastreabilidade ----
+  correctsId String?   @unique @map("corrects_id")
+  voidedAt   DateTime? @map("voided_at") @db.Timestamptz(3)
+  voidReason String?   @map("void_reason")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund        Fund       @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  corrects    Operation? @relation("OperationCorrection", fields: [correctsId], references: [id], onDelete: Restrict)
+  correctedBy Operation? @relation("OperationCorrection")
+
+  @@index([userId, tradeDate])
+  @@index([fundId, status])
+  @@map("operations")
+}
+
+/// Posição consolidada (cache). Sempre regravada na mesma transação que altera
+/// as operações do fundo; a fonte de verdade são as operações ativas.
+model Position {
+  fundId         String   @id @map("fund_id")
+  quantity       Decimal  @db.Decimal(18, 8)
+  /// Custo das cotas em carteira (inclui taxas de compra), precisão total.
+  totalCost      Decimal  @map("total_cost") @db.Decimal(30, 12)
+  /// Soma dos resultados realizados nas vendas, precisão total.
+  realizedResult Decimal  @map("realized_result") @db.Decimal(30, 12)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@map("positions")
+}
+
+enum QuoteSource {
+  /// Valor digitado pelo usuário como referência (não é cotação de mercado em tempo real).
+  MANUAL
+  /// Obtida automaticamente da brapi (cotação atual do endpoint de cotação).
+  BRAPI
+  /// Fechamento diário obtido do histórico da brapi (usado quando a cotação atual não está disponível no plano).
+  BRAPI_DAILY_CLOSE
+
+  @@map("quote_source")
+}
+
+/// Histórico de cotações. A cotação atual é a mais recente (recordedAt).
+model PriceQuote {
+  id            String      @id @default(cuid())
+  fundId        String      @map("fund_id")
+  price         Decimal     @db.Decimal(18, 8)
+  source        QuoteSource
+  /// Data a que o preço se refere, quando conhecida (nula se não informada).
+  referenceDate DateTime?   @map("reference_date") @db.Date
+  note          String?
+  /// Momento a que a cotação automática se refere, segundo o provedor.
+  marketTime    DateTime?   @map("market_time") @db.Timestamptz(3)
+  /// Fechamento anterior e variação do dia, quando o provedor informa.
+  previousClose Decimal?    @map("previous_close") @db.Decimal(18, 8)
+  change        Decimal?    @db.Decimal(18, 8)
+  /// Variação percentual em pontos percentuais (-1.16 = -1,16%), como o provedor informa.
+  changePercent Decimal?    @map("change_percent") @db.Decimal(12, 6)
+  /// Momento em que o sistema registrou a cotação (consulta ao provedor ou digitação).
+  recordedAt    DateTime    @default(now()) @map("recorded_at") @db.Timestamptz(3)
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@index([fundId, recordedAt])
+  @@map("price_quotes")
+}
+
+/// Trilha de auditoria de alterações (fundos, operações, cotações).
+model AuditEvent {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  action     String
+  data       Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("audit_events")
+}
+
+// ============================================================
+// Integrações e proventos (Etapa 3)
+// ============================================================
+
+/// Série diária de preços (histórico) obtida de provedores. Uma linha por fundo, data e fonte.
+model DailyPrice {
+  id            String      @id @default(cuid())
+  fundId        String      @map("fund_id")
+  date          DateTime    @db.Date
+  open          Decimal?    @db.Decimal(18, 8)
+  high          Decimal?    @db.Decimal(18, 8)
+  low           Decimal?    @db.Decimal(18, 8)
+  close         Decimal     @db.Decimal(18, 8)
+  adjustedClose Decimal?    @map("adjusted_close") @db.Decimal(18, 8)
+  volume        Decimal?    @db.Decimal(24, 0)
+  source        QuoteSource
+  fetchedAt     DateTime    @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@unique([fundId, date, source])
+  @@map("daily_prices")
+}
+
+enum DividendKind {
+  /// Anunciado oficialmente (por documento do fundo ou fonte que o reproduz).
+  OFFICIAL
+  /// Previsão/estimativa informada pelo usuário. NUNCA é tratada como anúncio.
+  FORECAST
+
+  @@map("dividend_kind")
+}
+
+enum DividendType {
+  /// Rendimento (renda).
+  INCOME
+  /// Amortização (devolução de capital). Não entra em renda nem em dividend yield.
+  AMORTIZATION
+
+  @@map("dividend_type")
+}
+
+enum DataSource {
+  MANUAL
+  BRAPI
+  B3_FUNDOSNET
+
+  @@map("data_source")
+}
+
+/// Provento de um fundo (evento): valor por cota, data-com e pagamento.
+/// O status (anunciado / pago / previsto) é derivado de kind + datas.
+model DividendEvent {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  fundId         String       @map("fund_id")
+  kind           DividendKind
+  type           DividendType
+  source         DataSource
+  /// Valor por cota pago na data (sem ajuste por desdobramento).
+  ratePerShare   Decimal      @map("rate_per_share") @db.Decimal(20, 10)
+  /// Data-com (data-base): quem tem a cota ao final deste dia tem direito.
+  dataCom        DateTime     @map("data_com") @db.Date
+  paymentDate    DateTime?    @map("payment_date") @db.Date
+  approvedOn     DateTime?    @map("approved_on") @db.Date
+  /// Competência normalizada "AAAA-MM", quando é possível obtê-la da fonte sem suposição.
+  competence     String?
+  /// Texto de referência como veio da fonte (ex.: "Outubro-2026").
+  referenceLabel String?      @map("reference_label")
+  /// Conferido em documento publicado (quando a fonte informa).
+  verified       Boolean?
+  /// Identificador na fonte (ex.: id do documento no FundosNET).
+  externalId     String?      @map("external_id")
+  notes          String?
+  voidedAt       DateTime?    @map("voided_at") @db.Timestamptz(3)
+  voidReason     String?      @map("void_reason")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund     Fund              @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  receipts DividendReceipt[]
+
+  @@index([userId, paymentDate])
+  @@index([fundId, dataCom])
+  @@map("dividend_events")
+}
+
+enum EligibilitySource {
+  /// Calculada pelo histórico de operações na data-com.
+  LEDGER
+  /// Informada/confirmada pelo usuário.
+  MANUAL
+
+  @@map("eligibility_source")
+}
+
+/// Provento efetivamente recebido e registrado pelo usuário.
+model DividendReceipt {
+  id               String            @id @default(cuid())
+  userId           String            @map("user_id")
+  fundId           String            @map("fund_id")
+  eventId          String            @map("event_id")
+  eligibleQuantity Decimal           @map("eligible_quantity") @db.Decimal(18, 8)
+  quantitySource   EligibilitySource @map("quantity_source")
+  ratePerShare     Decimal           @map("rate_per_share") @db.Decimal(20, 10)
+  /// round2(quantidade elegível × valor por cota)
+  totalAmount      Decimal           @map("total_amount") @db.Decimal(18, 2)
+  paymentDate      DateTime          @map("payment_date") @db.Date
+  notes            String?
+  voidedAt         DateTime?         @map("voided_at") @db.Timestamptz(3)
+  voidReason       String?           @map("void_reason")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund  Fund          @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  event DividendEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([userId, paymentDate])
+  @@map("dividend_receipts")
+}
+
+enum SyncKind {
+  QUOTES
+  DIVIDENDS
+  ASSET_INFO
+  PRICE_HISTORY
+
+  @@map("sync_kind")
+}
+
+enum SyncStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+  SKIPPED
+
+  @@map("sync_status")
+}
+
+/// Registro de cada atualização automática/manual (última atualização, falhas).
+model SyncRun {
+  id          String     @id @default(cuid())
+  userId      String     @map("user_id")
+  kind        SyncKind
+  provider    String
+  trigger     String
+  status      SyncStatus
+  message     String?
+  itemsOk     Int        @default(0) @map("items_ok")
+  itemsFailed Int        @default(0) @map("items_failed")
+  details     Json?
+  startedAt   DateTime   @map("started_at") @db.Timestamptz(3)
+  finishedAt  DateTime   @map("finished_at") @db.Timestamptz(3)
+
+  @@index([userId, kind, startedAt])
+  @@map("sync_runs")
+}
+
+/// Preferências do usuário para atualizações automáticas.
+model UserSettings {
+  userId               String   @id @map("user_id")
+  autoUpdateEnabled    Boolean  @default(true) @map("auto_update_enabled")
+  /// Intervalo mínimo entre atualizações automáticas de cotações.
+  quoteRefreshMinutes  Int      @default(30) @map("quote_refresh_minutes")
+  /// Intervalo mínimo entre importações automáticas de proventos.
+  dividendRefreshHours Int      @default(12) @map("dividend_refresh_hours")
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// ============================================================
+// Simulador (Etapa 4) — totalmente separado da carteira real
+// ============================================================
+
+/// Simulação salva. Guarda apenas a CONFIGURAÇÃO (premissas); os resultados
+/// são recalculados de forma determinística pelo motor. Nunca referencia
+/// operações/posições reais: a importação da carteira copia valores.
+model Simulation {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  name          String
+  description   String?
+  /// Origem: "MANUAL" (independente) ou "PORTFOLIO" (cópia da carteira real na data).
+  origin        String
+  config        Json
+  engineVersion String   @map("engine_version")
+  /// Resumo do último cálculo (para listagens).
+  summary       Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions SimulationVersion[]
+  goals    FinancialGoal[]
+
+  @@index([userId, updatedAt])
+  @@map("simulations")
+}
+
+/// Histórico de versões de uma simulação (cada vez que é salva).
+model SimulationVersion {
+  id            String   @id @default(cuid())
+  simulationId  String   @map("simulation_id")
+  version       Int
+  config        Json
+  engineVersion String   @map("engine_version")
+  summary       Json?
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  simulation Simulation @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+
+  @@unique([simulationId, version])
+  @@map("simulation_versions")
+}
+
+// ============================================================
+// Metas financeiras (Etapa 5)
+// ============================================================
+
+enum GoalMetric {
+  /// Renda mensal recorrente (cotas atuais × último rendimento oficial pago).
+  MONTHLY_INCOME
+  /// Valor de mercado da carteira.
+  PATRIMONY
+  /// Total de cotas em carteira.
+  TOTAL_SHARES
+  /// Objetivo personalizado: valor atual informado pelo usuário.
+  CUSTOM
+
+  @@map("goal_metric")
+}
+
+model FinancialGoal {
+  id            String     @id @default(cuid())
+  userId        String     @map("user_id")
+  name          String
+  metric        GoalMetric
+  target        Decimal    @db.Decimal(20, 2)
+  /// Apenas para CUSTOM: valor atual informado manualmente.
+  customCurrent Decimal?   @map("custom_current") @db.Decimal(20, 2)
+  /// Simulação cujas premissas estimam o prazo (opcional).
+  simulationId  String?    @map("simulation_id")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  simulation Simulation? @relation(fields: [simulationId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("financial_goals")
+}
