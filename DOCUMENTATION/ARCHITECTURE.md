@@ -1,0 +1,179 @@
+# Arquitetura — Bola de Neve
+
+## Visão geral
+
+Aplicação monolítica Next.js (App Router) com renderização no servidor,
+PostgreSQL como única fonte de verdade e camadas separadas para que regras de
+negócio e cálculos financeiros fiquem **fora da interface**.
+
+```
+Navegador ──► proxy.ts (checagem otimista do cookie)
+                │
+                ▼
+          App Router (src/app) ── Server Components / Server Actions / Route Handlers
+                │
+                ├─► DAL de autenticação (src/server/auth/dal.ts)  ← valida sessão no banco
+                ├─► Serviços (src/server/services)               ← casos de uso
+                │       ├─► Domínio (src/domain)                  ← regras/cálculos puros
+                │       ├─► Integrações (src/server/integrations) ← APIs externas
+                │       └─► Banco (src/server/db → Prisma → PostgreSQL)
+                └─► Validação (src/validation, Zod)               ← entrada de formulários/APIs
+```
+
+## Estrutura de pastas
+
+```
+prisma/
+  schema.prisma          Modelos e convenções do banco
+  migrations/            Migrações SQL versionadas (nunca editar as já aplicadas)
+prisma.config.ts         Configuração do Prisma CLI (Prisma 7)
+scripts/
+  create-user.ts         Cria o usuário / redefine senha (CLI)
+  check-db.ts            Teste de conexão com o PostgreSQL
+src/
+  app/                   Rotas (App Router)
+    (auth)/login/        Página e formulário de login (público)
+    (app)/               Área privada — layout exige sessão válida
+      dashboard/         Painel inicial
+    api/health/          Health check público (sem dados sensíveis)
+    layout.tsx, page.tsx Layout raiz; "/" redireciona para /dashboard
+  components/
+    ui/                  Componentes shadcn/ui (código copiado, editável)
+    layout/              Componentes estruturais (cabeçalho etc.)
+  domain/                Regras de negócio e cálculos PUROS (sem I/O, sem React)
+    money.ts             Decimal, escalas, arredondamento, formatação BRL
+  generated/prisma/      Cliente Prisma gerado (ignorado pelo Git)
+  lib/                   Utilitários genéricos de UI (cn)
+  server/                Código exclusivo do servidor
+    env.ts               Validação das variáveis de ambiente (Zod)
+    db/                  Fábrica e instância única do Prisma
+    auth/                Autenticação (ver seção abaixo)
+    services/            Serviços de aplicação (casos de uso) — próximas etapas
+    integrations/        Clientes de APIs externas — próximas etapas
+  validation/            Schemas Zod compartilhados (formulários, APIs)
+  proxy.ts               Proxy do Next 16 (antigo middleware)
+tests/
+  unit/                  Vitest, sem banco
+  integration/           Vitest + PostgreSQL real (.env.test)
+  e2e/                   Playwright contra o build de produção
+  support/               Helpers de teste
+```
+
+### Regras de dependência entre camadas
+
+| Camada             | Pode importar                                   | Não pode importar          |
+| ------------------ | ----------------------------------------------- | -------------------------- |
+| `src/domain`       | `decimal.js`, `zod`, outros módulos do domínio  | Prisma, Next, React, `server/*` |
+| `src/validation`   | `zod`, `src/domain`                             | Prisma, Next, `server/*`   |
+| `src/server/*`     | `domain`, `validation`, Prisma, Next (só em `auth/session.ts`, `dal.ts`, `actions.ts`) | componentes de UI |
+| `src/components`   | `lib`, `domain` (formatação), tipos públicos    | Prisma, `server/db`        |
+| `src/app`          | tudo acima                                      | —                          |
+
+- **Cálculos financeiros** ficam em `src/domain`, são puros e testados
+  unitariamente. A UI apenas exibe resultados.
+- **Serviços** recebem o banco por parâmetro (`db: Database`) para facilitar
+  testes de integração e reuso em scripts.
+- Módulos com `import "server-only"` falham no build se importados por Client
+  Components.
+
+## Banco de dados
+
+- PostgreSQL acessado via Prisma 7 com o driver adapter `@prisma/adapter-pg`.
+- Cliente gerado em `src/generated/prisma` (`npm install` executa
+  `prisma generate` no `postinstall`).
+- Instância única e lazy em `src/server/db/client.ts` (`getDb()`): o build não
+  exige banco e o hot reload não abre novos pools.
+
+### Convenções
+
+- Modelos `PascalCase` singular → tabelas `snake_case` plural (`@@map`).
+- Campos `camelCase` → colunas `snake_case` (`@map`).
+- IDs `cuid()` (texto). Datas `timestamptz` em UTC.
+- **Dinheiro/quantidades: `Decimal` com precisão explícita, nunca `Float`**
+  (escalas em [`FINANCIAL_RULES.md`](FINANCIAL_RULES.md#precisão-e-arredondamento)).
+- Toda entidade de domínio terá `userId` com `onDelete: Cascade`, e toda
+  consulta de serviço filtra pelo usuário autenticado.
+- Mudanças de schema sempre via `npm run db:migrate -- --name <descricao>`;
+  migrações aplicadas não são editadas.
+
+### Modelo atual
+
+| Tabela           | Finalidade                                                   |
+| ---------------- | ------------------------------------------------------------ |
+| `users`          | Usuário da plataforma (e-mail único, nome, hash scrypt)      |
+| `sessions`       | Sessões ativas: SHA-256 do token, expiração, IP, user agent  |
+| `login_attempts` | Tentativas de login (sucesso/falha) para rate limit/auditoria |
+
+## Autenticação
+
+Implementação própria, sem bibliotecas de terceiros, adequada a uso individual.
+
+| Arquivo (`src/server/auth/`) | Responsabilidade |
+| ---------------------------- | ---------------- |
+| `password.ts`   | Hash/verificação scrypt (`node:crypto`), comparação em tempo constante |
+| `tokens.ts`     | Token aleatório de 256 bits; banco guarda só o SHA-256 |
+| `rate-limit.ts` | Política anti força bruta (5 falhas/e-mail ou 20/IP em 15 min) |
+| `redirect.ts`   | Sanitiza `?next=` (proteção contra open redirect) |
+| `service.ts`    | Casos de uso independentes do Next: `createUser`, `login`, `validateSessionToken`, `revokeSession`, `changePassword`, `purgeExpiredAuthData` |
+| `session.ts`    | Cookie de sessão (`HttpOnly`, `SameSite=Lax`, `Secure` em produção) e metadados da requisição |
+| `dal.ts`        | **Data Access Layer**: `getCurrentUser()` / `requireUser()` — único ponto de leitura do usuário atual |
+| `actions.ts`    | Server Actions de login/logout |
+| `constants.ts`  | Nome do cookie e rotas públicas (sem dependências de servidor) |
+
+Fluxo:
+
+1. `proxy.ts` deixa passar rotas públicas (`/login`, `/api/health`); sem cookie,
+   redireciona páginas para `/login?next=…` e responde `401` para `/api/*`.
+2. A verificação **real** acontece na DAL, que consulta a sessão no banco
+   (existência e expiração). O layout `(app)` chama `requireUser()`.
+3. **Toda Server Action e Route Handler privado deve chamar
+   `requireUser()`/`getCurrentUser()` por conta própria** — layouts não protegem
+   actions.
+4. Login: valida com Zod → verifica rate limit → verifica senha (mesmo custo
+   para e-mail inexistente) → registra tentativa → cria sessão → define cookie.
+5. Logout: apaga a sessão no banco e expira o cookie.
+6. Sessão com duração fixa (`SESSION_TTL_HOURS`, padrão 7 dias), sem renovação
+   automática. Trocar a senha encerra todas as sessões.
+7. Server Actions do Next verificam `Origin` × `Host` (proteção CSRF) e o cookie
+   é `SameSite=Lax`.
+
+Não há página de cadastro: o usuário é criado por CLI (`npm run user:create`).
+
+### Observações de implantação
+
+- `X-Forwarded-For` é usado para rate limit por IP; só é confiável atrás de um
+  proxy reverso que sobrescreva o cabeçalho. O limite por e-mail funciona
+  independentemente disso.
+- Servir apenas via HTTPS (cabeçalho HSTS já configurado).
+
+## Decisões técnicas
+
+| Decisão | Motivo |
+| ------- | ------ |
+| Sessões no banco em vez de JWT | Revogação imediata (logout, troca de senha), nada sensível no cliente |
+| scrypt nativo em vez de bcrypt/argon2 | Sem dependência nativa; parâmetros N=2^15, r=8, p=1 |
+| Auth própria em vez de Auth.js | Usuário único com e-mail/senha; menos superfície e dependências |
+| `cacheComponents: false` | Toda a área privada é dinâmica por usuário; reavaliar se surgir conteúdo cacheável |
+| `decimal.js` | Precisão decimal exata para cálculos financeiros |
+| TypeScript 5.9 (não 7.x) | Compatibilidade garantida com `typescript-eslint` e tooling do Next |
+| `"type": "module"` | Configs (Vitest, Playwright) e scripts em ESM nativo |
+| Override de `effect` (3.22.5) | Corrige vulnerabilidade (GHSA-7589-6fvf-x4pw) na dependência do Prisma CLI |
+| Componentes shadcn/ui adicionados manualmente | O registro `ui.shadcn.com` estava inacessível no ambiente de desenvolvimento; os arquivos seguem o estilo `new-york` e `components.json` permite `npx shadcn add` normalmente |
+
+## Cabeçalhos de segurança
+
+Configurados em `next.config.ts` para todas as rotas: `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`,
+`Strict-Transport-Security`; `X-Powered-By` desativado. Content-Security-Policy
+com nonce fica como melhoria futura.
+
+## Testes
+
+| Tipo | Ferramenta | Comando | Escopo |
+| ---- | ---------- | ------- | ------ |
+| Unitário | Vitest | `npm test` | domínio, validação, senha, tokens, rate limit, redirect, env |
+| Integração | Vitest + PostgreSQL | `npm run test:integration` | conexão, migrações, serviço de autenticação completo |
+| E2E | Playwright (Chromium) | `npm run test:e2e` | login/logout reais no build de produção, proteção de rotas, atributos do cookie |
+
+Os testes de integração/E2E usam `.env.test` e recusam bancos cujo nome não
+contenha `test`, para nunca apagar dados reais.

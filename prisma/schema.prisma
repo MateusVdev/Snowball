@@ -1,0 +1,65 @@
+// Bola de Neve — schema do banco de dados (PostgreSQL)
+//
+// Convenções (ver DOCUMENTATION/ARCHITECTURE.md e FINANCIAL_RULES.md):
+// - Modelos em PascalCase singular; tabelas em snake_case plural via @@map.
+// - Campos em camelCase; colunas em snake_case via @map.
+// - IDs: cuid() em texto.
+// - Datas sempre em UTC (timestamptz).
+// - Valores monetários/quantidades: NUNCA Float. Usar Decimal (NUMERIC) com
+//   precisão explícita (ver FINANCIAL_RULES.md, seção "Precisão").
+// - Toda entidade de domínio pertence a um usuário (userId) e é removida em cascata.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  /// Hash scrypt no formato "scrypt$N$r$p$salt$hash". Nunca armazenar senha em texto puro.
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions Session[]
+
+  @@map("users")
+}
+
+/// Sessão server-side. O cookie contém um token aleatório; aqui guardamos apenas o SHA-256 dele.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique @map("token_hash")
+  userId     String   @map("user_id")
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  userAgent  String?  @map("user_agent")
+  ipAddress  String?  @map("ip_address")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Registro de tentativas de login, usado para limitar força bruta e para auditoria.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  /// E-mail normalizado (minúsculas) informado na tentativa — pode não existir em users.
+  email     String
+  ipAddress String?  @map("ip_address")
+  success   Boolean
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("login_attempts")
+}
