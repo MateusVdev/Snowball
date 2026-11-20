@@ -21,7 +21,8 @@
     "db:check": "tsx scripts/check-db.ts",
     "user:create": "tsx scripts/create-user.ts",
     "portfolio:seed": "tsx scripts/seed-initial-portfolio.ts",
-    "integrations:check": "tsx scripts/check-integrations.ts"
+    "integrations:check": "tsx scripts/check-integrations.ts",
+    "db:backup": "bash scripts/backup-db.sh"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

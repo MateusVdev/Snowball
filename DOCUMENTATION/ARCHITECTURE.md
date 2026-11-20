@@ -34,7 +34,15 @@ scripts/
 src/
   app/                   Rotas (App Router)
     (auth)/login/        Página e formulário de login (público)
-    (app)/               Área privada — layout exige sessão válida
+    (app)/               Área privada — layout exige sessão válida; menu lateral
+      dashboard/         Visão geral (dados do banco, gráficos, metas)
+      analise/           Análise da carteira (pesos, resultados, renda)
+      fundos/            Análise individual (índice → /carteira/[ticker])
+      metas/             Metas financeiras
+      calendario/        Calendário de proventos
+      dados/             Central de dados (integrações, origem, exportação, backup)
+      configuracoes/     Perfil, senha, sessões, atualização automática
+      loading.tsx, error.tsx, not-found.tsx  Estados de carregamento/erro
       dashboard/         Painel com resumo da carteira
       carteira/          Lista de posições, novo FII, posição individual,
                          edição/remoção (arquivamento) e saldo inicial
@@ -52,6 +60,8 @@ src/
     dates.ts             Datas de calendário (pregão) e fuso de São Paulo
     portfolio/ledger.ts  Livro-razão: saldo inicial, compra, venda, PM, realizado
     portfolio/metrics.ts Métricas da posição e consolidação da carteira
+    portfolio/history.ts Evolução mensal (investido × mercado), aportes, distribuição
+    goals.ts             Progresso e estimativa de prazo de metas
     dividends.ts         Elegibilidade na data-com, status, renda, DY, competência
     quotes.ts            Atualidade da cotação (horas úteis)
     simulation/          Motor "Bola de Neve" (puro, determinístico)
@@ -73,6 +83,9 @@ src/
       market/            cotações, histórico, dados cadastrais, sync-log, auto-refresh
       dividends/         eventos, recebimentos, elegibilidade, importação
       simulation/        salvar/editar (versões)/duplicar/excluir; importar CÓPIA da carteira
+      overview/          Visão geral consolidada (reaproveita carteira, proventos e ledger)
+      goals/             Metas (valor atual do banco; prazo pela simulação)
+    export/              CSV/XLSX (sem dependências pesadas), conjuntos exportáveis, backup/restauração
     integrations/        Provedores externos (ver INTEGRATIONS.md)
       types.ts           PriceProvider, DividendProvider, AssetInformationProvider
       brapi/, b3/        Implementações (brapi; B3 FundosNET)
@@ -144,6 +157,24 @@ tests/
 | `user_settings`  | Atualização automática (ligada, intervalos) |
 | `simulations`    | Simulações salvas: configuração (JSON validado por Zod) e resumo; sem referência à carteira real |
 | `simulation_versions` | Histórico de versões de cada simulação (criação, edições, restaurações) |
+| `financial_goals` | Metas: tipo (renda, patrimônio, cotas, personalizada), alvo, valor atual manual (personalizada), simulação para estimativa |
+
+### Interface (Etapa 5)
+
+- **Tema escuro:**
+  - fundo azul-marinho, cards com leve gradiente;
+  - roxo profundo no menu e nos realces;
+  - laranja como cor de ação;
+  - verde/vermelho para resultados (tokens `--positive`/`--negative`);
+  - animações sutis, respeitando `prefers-reduced-motion`.
+- **Menu lateral** fixo (≥ 1024 px) e gaveta acessível no celular. Fica fora do cabeçalho, porque o `backdrop-filter` criaria um bloco de contenção para elementos `fixed`.
+- **Gráficos (Recharts):**
+  - séries com a paleta categórica validada (azul, laranja, aqua, amarelo);
+  - legenda sempre que há 2 ou mais séries;
+  - tooltip com crosshair;
+  - pontos sem dado aparecem como "indisponível" (nunca zero);
+  - os mesmos valores aparecem em tabela na página.
+- `.grid > * { min-width: 0 }` impede que tabelas largas estourem a tela no celular; as tabelas rolam no próprio contêiner.
 
 ### Integridade da carteira
 

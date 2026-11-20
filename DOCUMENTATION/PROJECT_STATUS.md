@@ -10,8 +10,130 @@
 | 1 | Fundação e arquitetura | ✅ Concluída (2026-11-20) |
 | 2 | Carteira, FIIs e operações financeiras | ✅ Concluída (2026-11-20) |
 | 3 | Integrações financeiras e dividendos | ✅ Concluída (2026-11-20) |
-| 4 | Motor de simulação Bola de Neve | ✅ Concluída (2026-11-20) — aguardando validação do usuário |
-| 5 | A definir no próximo prompt | ⏳ Não iniciada |
+| 4 | Motor de simulação Bola de Neve | ✅ Concluída (2026-11-20) |
+| 5 | Dashboard, experiência visual e finalização | ✅ Concluída (2026-11-20) |
+
+---
+
+## Etapa 5 — Dashboard, experiência visual e finalização
+
+### Entregue
+
+- **Identidade visual:**
+  - tema escuro azul-marinho com roxo profundo, ações em laranja e verde/vermelho para resultados;
+  - cards com acabamento sutil, tipografia com números tabulares e animações discretas (respeitam `prefers-reduced-motion`).
+- **Menu lateral com as 11 seções**, cada uma levando a uma página funcional, com item ativo destacado. No celular, vira uma gaveta acessível (Esc fecha; sem rolagem horizontal em nenhuma página).
+- **Visão geral (do banco):**
+  - patrimônio, capital investido, lucro/prejuízo, rentabilidade e quantidade de cotas;
+  - dividendos do mês, do ano, acumulados e média mensal de 12 meses;
+  - renda passiva recorrente estimada e progresso das metas;
+  - gráficos: evolução patrimonial (reconstruída de operações e cotações; meses sem dado ficam indisponíveis, nunca estimados), dividendos, aportes e distribuição por fundo e segmento.
+- **Análise da carteira**: pesos, concentração, resultados, DY, YoC e renda por fundo.
+- **Análise individual**: cartões pesquisáveis por ticker. A página do fundo ganhou último rendimento e próximo provento anunciado ("Aguardando divulgação." quando não há).
+- **Simulador:**
+  - seleção de fundos da carteira (cópia de valores);
+  - seleção de cenários e de métrica nos gráficos;
+  - comparação de estratégias (configurada, 100%, 0%, concentrar no maior pagador);
+  - duplicar um cenário como nova simulação;
+  - **destaque das cotas compradas só com dividendos** (cartão, coluna na tabela e gráfico por mês).
+- **Metas:**
+  - renda mensal, patrimônio, cotas e personalizadas;
+  - progresso, valor restante e prazo estimado pela simulação escolhida (hipotético);
+  - editar e excluir com confirmação.
+- **Calendário de proventos:**
+  - grade mensal e lista;
+  - confirmados (anúncio oficial) × estimativas (previsões);
+  - valores esperados pela posição na data-com, próximos pagamentos e histórico.
+- **Central de dados:**
+  - integrações, histórico de atualizações, origem dos dados (manual × automático);
+  - exportação **CSV** (pt-BR, protegida contra fórmulas) e **Excel .xlsx** por conjunto ou completa;
+  - **backup JSON** com checksum, sem credenciais;
+  - **restauração** (só em conta vazia, transacional, novos IDs, ledger revalidado).
+- **Configurações:**
+  - perfil;
+  - troca de senha (exige a atual; encerra todas as sessões);
+  - sessões ativas e encerramento das outras;
+  - atualização automática.
+- **Experiência:**
+  - carregamento (esqueleto), erro com "tentar novamente" e "não encontrado";
+  - mensagens de sucesso e erro nos formulários, confirmações de exclusão;
+  - tooltips explicativos nos indicadores, estados vazios, filtros e pesquisa por ticker.
+- **Segurança** (detalhes em [`SECURITY.md`](SECURITY.md)):
+  - CSP com nonce por requisição (verificada no navegador sem violações);
+  - todas as rotas e ações revisadas;
+  - exportação e backup protegidos por sessão.
+- **Produção:**
+  - `npm run db:backup` (pg_dump; restauração testada em banco novo);
+  - [`DEPLOYMENT.md`](DEPLOYMENT.md) e [`USER_GUIDE.md`](USER_GUIDE.md).
+
+### Mudanças no banco
+
+| Migração | Conteúdo |
+| -------- | -------- |
+| `…_financial_goals` | Tabela `financial_goals` e enum `goal_metric` (simulação vinculada com `ON DELETE SET NULL`) |
+
+### Testes executados (2026-11-20)
+
+| Verificação | Resultado |
+| ----------- | --------- |
+| TypeScript (`npm run typecheck`) | ✅ sem erros |
+| ESLint | ✅ sem erros/avisos |
+| Unitários | ✅ 168/168 (inclui simulador, exemplo das 96 cotas, histórico da carteira, metas, CSV/XLSX, estratégias, CSP) |
+| Integração (PostgreSQL) | ✅ 57/57 (inclui visão geral, metas, backup ida e volta, restauração recusada/adulterada, escopo de exportações, sessões) |
+| E2E (Playwright, build de produção) | ✅ 32/32 |
+| Build de produção | ✅ |
+| Backup do banco (pg_dump → pg_restore em banco novo) | ✅ |
+| `npm audit` | ✅ 0 vulnerabilidades |
+
+Os E2E percorrem o menu completo (desktop e celular) e os fluxos pedidos:
+
+| Fluxo | Resultado |
+| ----- | --------- |
+| Login | ✅ |
+| Cadastro de fundo | ✅ |
+| Compra | ✅ |
+| Venda | ✅ |
+| Consulta e atualização de cotação | ✅ |
+| Cadastro de dividendos | ✅ |
+| Visualização da carteira e visão geral | ✅ |
+| Criação de simulação | ✅ |
+| Reinvestimento | ✅ |
+| Salvamento e persistência (inclusive reinício do servidor) | ✅ |
+| Metas, calendário, exportação, backup e configurações | ✅ |
+
+### Problemas encontrados e soluções
+
+| Problema | Solução |
+| -------- | ------- |
+| Menu lateral "preso" no topo | O `backdrop-filter` do cabeçalho criava um bloco de contenção para `fixed`; o menu foi movido para fora do cabeçalho |
+| Rolagem horizontal no celular em páginas com tabelas | `.grid > * { min-width: 0 }`; as tabelas rolam no próprio contêiner |
+| Calendário somava R$ 0,00 quando a quantidade elegível era desconhecida | Passa a indicar "sem valor conhecido" em vez de somar zero |
+| Testes com expectativa errada (12 × 1,10 = 13,20, não 11,00) | O sistema estava certo; expectativa do teste corrigida |
+| Testes E2E antigos afetados por novas colunas e botões | Seletores e valores atualizados |
+| Ambiente reiniciado durante a etapa (PostgreSQL parado) | Banco religado; migrações e dados conferidos; trabalho preservado e commitado |
+
+---
+
+## Estado final do projeto
+
+- **Banco:** 10 migrações versionadas. Tabelas:
+  - carteira: `funds`, `operations`, `positions`, `price_quotes`, `daily_prices`;
+  - proventos: `dividend_events`, `dividend_receipts`;
+  - simulador e metas: `simulations`, `simulation_versions`, `financial_goals`;
+  - sistema: `sync_runs`, `user_settings`, `audit_events`;
+  - autenticação: `users`, `sessions`, `login_attempts`.
+- **Integrações disponíveis:**
+  - brapi: cotação, fechamentos diários, proventos e cadastro; sem chave, só os fundos de teste MXRF11/HGLG11;
+  - B3 FundosNET: avisos oficiais de rendimentos, exige CNPJ.
+- **Pendências e limitações:**
+  - sem custos, impostos ou eventos corporativos (desdobramento/grupamento/amortização no custo);
+  - sem 2FA;
+  - feriados não são considerados em "desatualizada" nem no calendário do simulador;
+  - a evolução patrimonial só existe a partir dos registros (o saldo inicial vale desde o dia do cadastro);
+  - a FundosNET pode bloquear temporariamente consultas automáticas;
+  - sem `BRAPI_API_KEY`, a cotação é o fechamento anterior;
+  - `style-src 'unsafe-inline'` na CSP.
+- **Deploy:** não realizado (requer servidor, banco e credenciais); procedimento em [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ---
 
