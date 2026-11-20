@@ -8,7 +8,16 @@ import type { MonthResult } from "@/domain/simulation";
  * - Estimativa de tempo: primeiro mês em que a simulação escolhida (premissas
  *   do usuário) atinge a meta. É hipotética; sem simulação, não há estimativa.
  */
-export type GoalMetric = "MONTHLY_INCOME" | "PATRIMONY" | "TOTAL_SHARES" | "CUSTOM";
+export type GoalMetric = "MONTHLY_INCOME" | "PATRIMONY" | "TOTAL_SHARES" | "CUSTOM" | "TOTAL_PATRIMONY";
+
+/** Rótulos dos tipos de meta. "Patrimônio" (metas antigas) continua sendo só FIIs. */
+export const GOAL_METRIC_LABEL: Record<GoalMetric, string> = {
+  MONTHLY_INCOME: "Renda mensal",
+  PATRIMONY: "Patrimônio (só FIIs)",
+  TOTAL_PATRIMONY: "Patrimônio total (FIIs + renda fixa)",
+  TOTAL_SHARES: "Total de cotas",
+  CUSTOM: "Personalizada",
+};
 
 export function goalProgress(current: DecimalInput, target: DecimalInput) {
   const c = toDecimal(current);

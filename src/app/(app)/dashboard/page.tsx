@@ -72,46 +72,52 @@ export default async function DashboardPage() {
         actions={<Button asChild variant="outline"><Link href="/carteira">Minha carteira <ArrowRight aria-hidden /></Link></Button>}
       />
 
-      <section className="grid gap-4 lg:grid-cols-3" aria-label="Patrimônio">
-        <Card className="accent-ring lg:col-span-1">
-          <CardContent className="grid gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Patrimônio total</span>
-            <span className="text-3xl font-semibold tracking-tight" data-testid="overview-patrimony">
-              {patrimony.total ? <Money value={patrimony.total} /> : <span title="Há fundos sem cotação">—</span>}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              {patrimony.total ? "FIIs pela cotação atual + renda fixa pelo valor bruto estimado." : `${t.positionsWithoutQuote} fundo(s) sem cotação: total indisponível.`}
-            </span>
-            <ul className="mt-2 grid gap-2" aria-label="Patrimônio por classe de ativo" data-testid="patrimony-by-class">
+      <section aria-label="Patrimônio total">
+        <Card className="accent-ring">
+          <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center">
+            <div className="grid gap-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Patrimônio total</span>
+              <span className="text-4xl font-semibold tracking-tight" data-testid="overview-patrimony">
+                {patrimony.total ? <Money value={patrimony.total} /> : <span title="Há fundos sem cotação">—</span>}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {patrimony.total
+                  ? `${patrimony.classes.map((c) => c.label).join(" + ") || "Sem posições"} · FIIs pela cotação atual, renda fixa pelo valor bruto estimado.`
+                  : `${t.positionsWithoutQuote} fundo(s) sem cotação: total indisponível.`}
+              </span>
+            </div>
+            <ul className="grid gap-3 sm:grid-cols-2" aria-label="Patrimônio por classe de ativo" data-testid="patrimony-by-class">
               {patrimony.classes.map((c, i) => (
-                <li key={c.key} className="grid gap-1" data-testid={`patrimony-class-${c.key}`}>
+                <li key={c.key} className="grid gap-2 rounded-lg border p-3" data-testid={`patrimony-class-${c.key}`}>
                   <div className="flex items-baseline justify-between gap-3 text-sm">
                     {c.href ? <Link className="font-medium underline-offset-4 hover:underline" href={c.href}>{c.label}</Link> : <span className="font-medium">{c.label}</span>}
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {c.share ? `${formatPercent(c.share)} · ` : ""}
-                      {c.value ? <Money value={c.value} /> : "sem cotação"}
-                    </span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{c.share ? formatPercent(c.share) : ""}</span>
                   </div>
+                  <span className="text-xl font-semibold tabular-nums">{c.value ? <Money value={c.value} /> : "sem cotação"}</span>
                   {c.share ? (
                     <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden>
                       <div className="h-full rounded-full" style={{ width: `${Math.max(1, c.share.times(100).toNumber())}%`, background: `var(--series-${(i % 4) + 1})` }} />
                     </div>
                   ) : null}
+                  <span className="text-xs text-muted-foreground">
+                    {c.key === "FII" ? (
+                      <>Resultado <Money value={t.unrealizedResult} signed /> · rentabilidade <Percent value={t.unrealizedReturn} /></>
+                    ) : c.key === "FIXED_INCOME" ? (
+                      <>
+                        Líquido estimado <Money value={o.fixedIncome.totals.net} />
+                        {o.fixedIncome.yieldEstimate.available ? <> · rende ~<Money value={o.fixedIncome.yieldEstimate.perBusinessDay.gross} /> por dia útil</> : null}
+                      </>
+                    ) : null}
+                  </span>
                 </li>
               ))}
             </ul>
-            {o.fixedIncome.assets.length ? (
-              <span className="text-xs text-muted-foreground">
-                Renda fixa: estimativa pelo CDI/Selic do Banco Central (líquido estimado <Money value={o.fixedIncome.totals.net} />).
-              </span>
-            ) : null}
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-              <span>Resultado FIIs: <Money value={t.unrealizedResult} signed /></span>
-              <span>Rentabilidade FIIs: <Percent value={t.unrealizedReturn} /></span>
-            </div>
           </CardContent>
         </Card>
-        <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
+      </section>
+
+      <section className="grid gap-4" aria-label="Indicadores dos FIIs">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <Stat label="Capital investido" info="Custo das cotas em carteira, incluindo taxas de compra (preço médio × quantidade)."><Money value={t.investedCapital} /></Stat>
           <Stat label="Lucro / prejuízo" hint={<>Realizado <Money value={t.realizedResult} signed /></>} info="Não realizado (valor atual − investido) + resultado realizado nas vendas."><Money value={totalResult} signed /></Stat>
           <Stat label="Quantidade de cotas"><Quantity value={o.totalShares} /></Stat>

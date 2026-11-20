@@ -17,6 +17,22 @@
 | RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída e publicada (PR #2) |
 | PJ-1 | Projeções — Parte 1: quanto a renda fixa rende | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
 | PJ-2 | Projeções — Parte 2: simulador de renda fixa com aportes | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
+| PJ-3 | Projeções — Parte 3: patrimônio geral (simulação total, metas, dashboard) | ✅ Concluída (2026-11-20) — PR aberto, sem merge |
+
+---
+
+## Projeções — Parte 3 (patrimônio geral)
+
+- `/simulador/patrimonio`: simulação do patrimônio total (FIIs + renda fixa) a
+  partir de simulações salvas, mês a mês, com divisão por classe (pronta para Ações).
+- Metas: novo tipo "Patrimônio total (FIIs + renda fixa)", com estimativa pela
+  soma das simulações de FIIs e de renda fixa. Metas antigas inalteradas
+  ("Patrimônio" = só FIIs).
+- Dashboard: bloco "Patrimônio total" em largura total no topo, com a divisão
+  por classe.
+- **Migração `20261120174332_goal_total_patrimony`** — somente aditiva
+  (`ALTER TYPE goal_metric ADD VALUE 'TOTAL_PATRIMONY'`, coluna opcional
+  `financial_goals.fixed_income_simulation_id` e sua FK).
 
 ---
 

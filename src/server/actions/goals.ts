@@ -12,6 +12,7 @@ const input = (formData: FormData) => ({
   target: String(formData.get("target") ?? ""),
   customCurrent: String(formData.get("customCurrent") ?? ""),
   simulationId: String(formData.get("simulationId") ?? ""),
+  fixedIncomeSimulationId: String(formData.get("fixedIncomeSimulationId") ?? ""),
 });
 
 export async function createGoalAction(_: FormState, formData: FormData): Promise<FormState> {

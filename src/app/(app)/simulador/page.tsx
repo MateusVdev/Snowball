@@ -24,6 +24,7 @@ export default async function SimulatorPage() {
         description="Como os dividendos reinvestidos compram novas cotas, que geram novos dividendos."
         actions={
           <>
+            <Button asChild variant="outline"><Link href="/simulador/patrimonio">Patrimônio total</Link></Button>
             <Button asChild variant="outline"><Link href="/renda-fixa/simulador">Simular renda fixa</Link></Button>
             <Button asChild variant="outline"><Link href="/simulador/nova?origem=exemplo">Exemplo: 96 cotas</Link></Button>
             <Button asChild variant="outline"><Link href="/simulador/nova?origem=carteira">Importar minha carteira</Link></Button>

@@ -528,3 +528,22 @@ IR regressivo e IOF por aporte, calendário de dias úteis):
 - Isenção de IR selecionável (LCI/LCA). Prazo máximo: 360 meses.
 - Simulações salvas guardam os parâmetros e a data de início (resultado
   reproduzível); entram no backup/restauração e na exportação.
+
+### Simulação do patrimônio total (`src/domain/portfolio/patrimony-projection.ts`)
+
+- Junta simulações SALVAS: FIIs (simulador bola de neve → patrimônio de cada
+  mês) + renda fixa (simulador de renda fixa → valor **bruto** de cada mês, a
+  mesma base do patrimônio do dashboard; o total com a renda fixa líquida
+  aparece à parte). Ambas contam a partir do mês 1.
+- Vai até o prazo da simulação mais curta (nada é inventado depois disso).
+- Total e divisão de cada mês usam `patrimonyByClass`. Ações: basta acrescentar
+  a série da classe "STOCKS" (ainda sem simulador).
+
+### Metas de patrimônio
+
+- "Patrimônio (só FIIs)" (`PATRIMONY`) — comportamento das metas antigas, sem
+  mudança: valor de mercado dos FIIs.
+- "Patrimônio total (FIIs + renda fixa)" (`TOTAL_PATRIMONY`) — novo: o mesmo
+  patrimônio total do dashboard. A estimativa de prazo usa a soma, mês a mês,
+  da simulação de FIIs e da simulação de renda fixa vinculadas (primeiro mês em
+  que o total alcança a meta). Com só uma vinculada, só ela conta (a nota avisa).
