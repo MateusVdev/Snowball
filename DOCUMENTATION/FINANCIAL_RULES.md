@@ -488,3 +488,62 @@ bruto equivalente é maior que R$ 600 e o segundo aporte fica intacto.
   ações no futuro = informar o valor da classe no serviço da visão geral.
 - A meta do tipo "Patrimônio" continua considerando só os FIIs (texto da meta
   deixa isso explícito).
+
+### "Quanto rende" — rendimento estimado (`src/domain/fixed-income/yield-estimate.ts`)
+
+Estimativas a partir do **saldo bruto atual** e da **última taxa diária
+publicada** do CDI/Selic (data mostrada na tela):
+
+- **Por dia útil** = saldo bruto × (fator diário − 1), com
+  fator = 1 + taxa_do_dia% × % do título (× spread^(1/252), se houver).
+- **No mês até hoje** = rendimento bruto do mês calculado pelo motor.
+- **Projeção do mês inteiro** = até hoje + saldo × (fator^n − 1), onde n = dias
+  úteis de hoje (inclusive — o rendimento de hoje ainda não entrou) até o fim do
+  mês, pelo calendário de feriados. Com a taxa constante, a projeção é igual ao
+  que o motor calcula no 1º dia do mês seguinte (coberto por teste).
+- **Líquido de IR** = bruto × (1 − alíquota média), onde a alíquota média é a do
+  prazo atual de cada aporte ainda investido, ponderada pelo saldo bruto de cada
+  um. Isentos: líquido = bruto.
+- **Não inclui IOF** (só existe nos primeiros 29 dias de cada aporte e varia dia
+  a dia) nem aportes/resgates futuros. O saldo líquido da posição continua
+  descontando IOF.
+- Sem nenhuma taxa guardada: por dia e projeção ficam indisponíveis ("—").
+- Total da renda fixa (lista e dashboard) = soma dos títulos ativos.
+
+### Simulador de renda fixa (`src/domain/fixed-income/simulation.ts`)
+
+Simulação hipotética com aportes mensais, reaproveitando o motor (DailyIndex,
+IR regressivo e IOF por aporte, calendário de dias úteis):
+
+- Indexador anual → taxa diária constante: d = (1 + a)^(1/252) − 1, aplicada só
+  em dias úteis. "% do CDI": fator = 1 + d_CDI × %; "taxa anual fixa": fator = 1 + d_taxa.
+- CDI anual pré-preenchido = última taxa diária do CDI (Banco Central)
+  anualizada: (1 + d)^252 − 1 (ex.: 0,055131% ao dia ≈ 14,90% a.a.). Editável.
+- Valor inicial pré-preenchido com o saldo bruto atual da renda fixa. Editável.
+- Valor inicial na data de início; aporte mensal no início de cada mês (mês 1
+  inclusive), no mesmo dia do mês (ou último dia do mês), passando para o próximo
+  dia útil em fim de semana/feriado. Total aplicado = inicial + meses × aporte.
+- Mês k termina em início + k meses; a posição considera os aportes feitos antes
+  dessa data. Valor líquido = bruto − IR − IOF, como se resgatasse tudo no fim do mês.
+- Isenção de IR selecionável (LCI/LCA). Prazo máximo: 360 meses.
+- Simulações salvas guardam os parâmetros e a data de início (resultado
+  reproduzível); entram no backup/restauração e na exportação.
+
+### Simulação do patrimônio total (`src/domain/portfolio/patrimony-projection.ts`)
+
+- Junta simulações SALVAS: FIIs (simulador bola de neve → patrimônio de cada
+  mês) + renda fixa (simulador de renda fixa → valor **bruto** de cada mês, a
+  mesma base do patrimônio do dashboard; o total com a renda fixa líquida
+  aparece à parte). Ambas contam a partir do mês 1.
+- Vai até o prazo da simulação mais curta (nada é inventado depois disso).
+- Total e divisão de cada mês usam `patrimonyByClass`. Ações: basta acrescentar
+  a série da classe "STOCKS" (ainda sem simulador).
+
+### Metas de patrimônio
+
+- "Patrimônio (só FIIs)" (`PATRIMONY`) — comportamento das metas antigas, sem
+  mudança: valor de mercado dos FIIs.
+- "Patrimônio total (FIIs + renda fixa)" (`TOTAL_PATRIMONY`) — novo: o mesmo
+  patrimônio total do dashboard. A estimativa de prazo usa a soma, mês a mês,
+  da simulação de FIIs e da simulação de renda fixa vinculadas (primeiro mês em
+  que o total alcança a meta). Com só uma vinculada, só ela conta (a nota avisa).

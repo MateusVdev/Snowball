@@ -5,6 +5,8 @@ import type { Prisma } from "@/generated/prisma/client";
 import { rebuildFundLedger } from "@/server/services/portfolio/ledger-sync";
 import { ServiceError } from "@/server/services/errors";
 import { parseSimulationConfig } from "@/validation/simulation";
+import type { FixedIncomeSimulationFormInput } from "@/validation/fixed-income-simulation";
+import { runFixedIncomeSimulation, simulationSummaryJson } from "@/server/services/fixed-income/simulation-service";
 
 /**
  * Backup e restauração dos dados do usuário (JSON).
@@ -14,7 +16,9 @@ import { parseSimulationConfig } from "@/validation/simulation";
  *   metas, renda fixa): nada é apagado nem sobrescrito.
  * - Renda fixa: títulos e movimentos entram no backup. As taxas do CDI/Selic
  *   (cache público do Banco Central) não entram: são buscadas de novo.
- *   Backups antigos (sem renda fixa) continuam válidos — os campos são opcionais. Novos IDs são gerados e as
+ *   Backups antigos (sem renda fixa) continuam válidos — os campos são opcionais.
+ * - Simulações de renda fixa (parâmetros) entram no backup; o resultado é
+ *   recalculado na restauração. Novos IDs são gerados e as
  *   referências internas são remapeadas; o livro-razão de cada fundo é
  *   reprocessado (histórico inconsistente → nada é gravado).
  */
@@ -26,7 +30,7 @@ const toStr = (v: { toString(): string } | null) => (v === null ? null : v.toStr
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
 export async function exportBackup(db: Database, userId: string) {
-  const [funds, operations, quotes, dailyPrices, events, receipts, simulations, goals, settings, audit, fiAssets, fiMovements] = await Promise.all([
+  const [funds, operations, quotes, dailyPrices, events, receipts, simulations, goals, settings, audit, fiAssets, fiMovements, fiSims] = await Promise.all([
     db.fund.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.operation.findMany({ where: { userId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
     db.priceQuote.findMany({ where: { fund: { userId } }, orderBy: { recordedAt: "asc" } }),
@@ -39,6 +43,7 @@ export async function exportBackup(db: Database, userId: string) {
     db.auditEvent.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.fixedIncomeAsset.findMany({ where: { userId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
     db.fixedIncomeMovement.findMany({ where: { userId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
+    db.fixedIncomeSimulation.findMany({ where: { userId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
   ]);
   const data = {
     funds: funds.map((f) => ({ id: f.id, ticker: f.ticker, name: f.name, segment: f.segment, cnpj: f.cnpj, notes: f.notes, archivedAt: iso(f.archivedAt), createdAt: iso(f.createdAt) })),
@@ -52,7 +57,7 @@ export async function exportBackup(db: Database, userId: string) {
     dividendEvents: events.map((e) => ({ id: e.id, fundId: e.fundId, kind: e.kind, type: e.type, source: e.source, ratePerShare: toStr(e.ratePerShare), dataCom: iso(e.dataCom), paymentDate: iso(e.paymentDate), approvedOn: iso(e.approvedOn), competence: e.competence, referenceLabel: e.referenceLabel, verified: e.verified, externalId: e.externalId, notes: e.notes, voidedAt: iso(e.voidedAt), voidReason: e.voidReason, createdAt: iso(e.createdAt) })),
     dividendReceipts: receipts.map((r) => ({ fundId: r.fundId, eventId: r.eventId, eligibleQuantity: toStr(r.eligibleQuantity), quantitySource: r.quantitySource, ratePerShare: toStr(r.ratePerShare), totalAmount: toStr(r.totalAmount), paymentDate: iso(r.paymentDate), notes: r.notes, voidedAt: iso(r.voidedAt), voidReason: r.voidReason, createdAt: iso(r.createdAt) })),
     simulations: simulations.map((s) => ({ id: s.id, name: s.name, description: s.description, origin: s.origin, config: s.config, createdAt: iso(s.createdAt), versions: s.versions.map((v) => ({ version: v.version, config: v.config, note: v.note, createdAt: iso(v.createdAt) })) })),
-    goals: goals.map((g) => ({ name: g.name, metric: g.metric, target: toStr(g.target), customCurrent: toStr(g.customCurrent), simulationId: g.simulationId })),
+    goals: goals.map((g) => ({ name: g.name, metric: g.metric, target: toStr(g.target), customCurrent: toStr(g.customCurrent), simulationId: g.simulationId, fixedIncomeSimulationId: g.fixedIncomeSimulationId })),
     settings: settings ? { autoUpdateEnabled: settings.autoUpdateEnabled, quoteRefreshMinutes: settings.quoteRefreshMinutes, dividendRefreshHours: settings.dividendRefreshHours } : null,
     auditEvents: audit.map((a) => ({ entityType: a.entityType, entityId: a.entityId, action: a.action, data: a.data, createdAt: iso(a.createdAt) })),
     fixedIncomeAssets: fiAssets.map((f) => ({
@@ -60,6 +65,7 @@ export async function exportBackup(db: Database, userId: string) {
       spreadAnnualPercent: toStr(f.spreadAnnualPercent), taxExempt: f.taxExempt, dailyLiquidity: f.dailyLiquidity,
       maturityDate: iso(f.maturityDate), notes: f.notes, archivedAt: iso(f.archivedAt), createdAt: iso(f.createdAt),
     })),
+    fixedIncomeSimulations: fiSims.map((f) => ({ id: f.id, name: f.name, config: f.config, createdAt: iso(f.createdAt) })),
     fixedIncomeMovements: fiMovements.map((m) => ({ id: m.id, assetId: m.assetId, type: m.type, date: iso(m.date), amount: toStr(m.amount), notes: m.notes, createdAt: iso(m.createdAt) })),
   };
   const json = JSON.stringify(data);
@@ -95,7 +101,7 @@ const backupSchema = z.object({
     dividendEvents: z.array(z.object({ id: s, fundId: s, kind: z.enum(["OFFICIAL", "FORECAST"]), type: z.enum(["INCOME", "AMORTIZATION"]), source: z.enum(["MANUAL", "BRAPI", "B3_FUNDOSNET"]), ratePerShare: s, dataCom: isoDate, paymentDate: nIso, approvedOn: nIso, competence: ns, referenceLabel: ns, verified: z.boolean().nullable(), externalId: ns, notes: ns, voidedAt: nIso, voidReason: ns, createdAt: isoDate })),
     dividendReceipts: z.array(z.object({ fundId: s, eventId: s, eligibleQuantity: s, quantitySource: z.enum(["LEDGER", "MANUAL"]), ratePerShare: s, totalAmount: s, paymentDate: isoDate, notes: ns, voidedAt: nIso, voidReason: ns, createdAt: isoDate })),
     simulations: z.array(z.object({ id: s, name: s, description: ns, origin: s, config: z.unknown(), createdAt: isoDate, versions: z.array(z.object({ version: z.number().int(), config: z.unknown(), note: ns, createdAt: isoDate })) })),
-    goals: z.array(z.object({ name: s, metric: z.enum(["MONTHLY_INCOME", "PATRIMONY", "TOTAL_SHARES", "CUSTOM"]), target: s, customCurrent: ns, simulationId: ns })),
+    goals: z.array(z.object({ name: s, metric: z.enum(["MONTHLY_INCOME", "PATRIMONY", "TOTAL_SHARES", "CUSTOM", "TOTAL_PATRIMONY"]), target: s, customCurrent: ns, simulationId: ns, fixedIncomeSimulationId: ns.optional() })),
     settings: z.object({ autoUpdateEnabled: z.boolean(), quoteRefreshMinutes: z.number().int(), dividendRefreshHours: z.number().int() }).nullable(),
     auditEvents: z.array(z.object({ entityType: s, entityId: s, action: s, data: z.unknown(), createdAt: isoDate })),
     // Renda fixa (opcional: backups anteriores não têm estes campos).
@@ -106,6 +112,7 @@ const backupSchema = z.object({
         dailyLiquidity: z.boolean(), maturityDate: nIso, notes: ns, archivedAt: nIso, createdAt: isoDate,
       }))
       .default([]),
+    fixedIncomeSimulations: z.array(z.object({ id: s, name: s, config: z.unknown(), createdAt: isoDate })).default([]),
     fixedIncomeMovements: z
       .array(z.object({ id: s.optional(), assetId: s, type: z.enum(["DEPOSIT", "WITHDRAWAL"]), date: isoDate, amount: decimal, notes: ns, createdAt: isoDate }))
       .default([]),
@@ -125,18 +132,26 @@ export async function restoreBackup(db: Database, userId: string, raw: unknown) 
   const checksum = createHash("sha256").update(JSON.stringify((raw as { data: unknown }).data)).digest("hex");
   if (checksum !== backup.checksum) throw new ServiceError("INVALID", "Checksum não confere: o arquivo foi alterado ou está corrompido.");
 
-  const [funds, events, sims, goals, fixedIncome] = await Promise.all([
+  const [funds, events, sims, goals, fixedIncome, fixedIncomeSims] = await Promise.all([
     db.fund.count({ where: { userId } }),
     db.dividendEvent.count({ where: { userId } }),
     db.simulation.count({ where: { userId } }),
     db.financialGoal.count({ where: { userId } }),
     db.fixedIncomeAsset.count({ where: { userId } }),
+    db.fixedIncomeSimulation.count({ where: { userId } }),
   ]);
-  if (funds + events + sims + goals + fixedIncome > 0) {
+  if (funds + events + sims + goals + fixedIncome + fixedIncomeSims > 0) {
     throw new ServiceError("CONFLICT", "A restauração só é feita em uma conta sem dados (para nunca apagar ou sobrescrever registros). Use um banco novo ou outro usuário.");
   }
   // Configurações de simulação são revalidadas antes de gravar.
   for (const sim of backup.data.simulations) parseSimulationConfig(sim.config);
+  const fiSimResults = backup.data.fixedIncomeSimulations.map((sim) => {
+    try {
+      return { sim, ...runFixedIncomeSimulation(sim.config as FixedIncomeSimulationFormInput) };
+    } catch {
+      throw new ServiceError("INVALID", `Simulação de renda fixa inválida no backup: ${sim.name}.`);
+    }
+  });
 
   const B = backup.data;
   return db.$transaction(
@@ -189,8 +204,15 @@ export async function restoreBackup(db: Database, userId: string, raw: unknown) 
           await tx.simulationVersion.createMany({ data: sim.versions.map((v) => ({ simulationId: created.id, version: v.version, config: v.config as Prisma.InputJsonValue, engineVersion: parseSimulationConfig(v.config).engineVersion, note: v.note, createdAt: new Date(v.createdAt) })) });
         }
       }
+      // Simulações de renda fixa antes das metas (que podem apontar para elas).
+      for (const { sim, config, result } of fiSimResults) {
+        const created = await tx.fixedIncomeSimulation.create({
+          data: { userId, name: sim.name, config: config as unknown as Prisma.InputJsonValue, summary: simulationSummaryJson(result), createdAt: new Date(sim.createdAt) },
+        });
+        ids.set(sim.id, created.id);
+      }
       for (const g of B.goals) {
-        await tx.financialGoal.create({ data: { userId, name: g.name, metric: g.metric, target: g.target, customCurrent: g.customCurrent, simulationId: map(g.simulationId) } });
+        await tx.financialGoal.create({ data: { userId, name: g.name, metric: g.metric, target: g.target, customCurrent: g.customCurrent, simulationId: map(g.simulationId), fixedIncomeSimulationId: map(g.fixedIncomeSimulationId ?? null) } });
       }
       for (const f of B.fixedIncomeAssets) {
         const created = await tx.fixedIncomeAsset.create({
@@ -216,7 +238,7 @@ export async function restoreBackup(db: Database, userId: string, raw: unknown) 
         await tx.auditEvent.createMany({ data: B.auditEvents.map((a) => ({ userId, entityType: a.entityType, entityId: map(a.entityId) ?? a.entityId, action: a.action, data: (a.data ?? undefined) as Prisma.InputJsonValue | undefined, createdAt: new Date(a.createdAt) })) });
       }
       await tx.auditEvent.create({ data: { userId, entityType: "backup", entityId: backup.checksum.slice(0, 16), action: "restore", data: { exportedAt: backup.exportedAt, funds: B.funds.length, operations: B.operations.length, fixedIncomeAssets: B.fixedIncomeAssets.length } } });
-      return { funds: B.funds.length, operations: B.operations.length, dividendEvents: B.dividendEvents.length, receipts: B.dividendReceipts.length, simulations: B.simulations.length, goals: B.goals.length, fixedIncomeAssets: B.fixedIncomeAssets.length, fixedIncomeMovements: B.fixedIncomeMovements.length };
+      return { funds: B.funds.length, operations: B.operations.length, dividendEvents: B.dividendEvents.length, receipts: B.dividendReceipts.length, simulations: B.simulations.length, goals: B.goals.length, fixedIncomeAssets: B.fixedIncomeAssets.length, fixedIncomeMovements: B.fixedIncomeMovements.length, fixedIncomeSimulations: B.fixedIncomeSimulations.length };
     },
     { timeout: 120_000, maxWait: 10_000 },
   );

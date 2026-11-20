@@ -246,3 +246,33 @@ describe("isolamento por usuário", () => {
     expect((await listFixedIncomeAssets(db, userId)).assets).toHaveLength(1);
   });
 });
+
+describe("quanto rende (estimativas)", () => {
+  it("cada título tem a estimativa; o total soma os títulos ativos; isolado por usuário", async () => {
+    await seedRates("CDI", "2026-01-01", "2026-11-19", "0.05");
+    const a = await createFixedIncomeAsset(db, userId, caixinha);
+    await addFixedIncomeMovement(db, userId, a.id, { type: "DEPOSIT", date: "2026-10-01", amount: "1000" });
+    const b = await createFixedIncomeAsset(db, userId, { name: "LCI", productType: "LCI", indexer: "CDI", rate: "90" });
+    await addFixedIncomeMovement(db, userId, b.id, { type: "DEPOSIT", date: "2026-01-02", amount: "500" });
+    const archived = await createFixedIncomeAsset(db, userId, { name: "Velho", productType: "CDB", indexer: "CDI", rate: "100" });
+    await addFixedIncomeMovement(db, userId, archived.id, { type: "DEPOSIT", date: "2026-01-02", amount: "9999" });
+    await setFixedIncomeAssetArchived(db, userId, archived.id, true);
+
+    const s = await listFixedIncomeAssets(db, userId, { asOf: "2026-11-19" });
+    const [cx, lci] = [s.assets.find((x) => x.name === "Caixinha Turbo")!, s.assets.find((x) => x.name === "LCI")!];
+    expect(cx.yieldEstimate.available).toBe(true);
+    expect(cx.yieldEstimate.rateDate).toBe("2026-11-19");
+    expect(cx.yieldEstimate.perBusinessDay.gross.minus(cx.result.current.gross.times("0.000575")).abs().lt("1e-20")).toBe(true);
+    expect(cx.yieldEstimate.incomeTaxRate.toFixed()).toBe("0.225"); // 49 dias
+    expect(lci.yieldEstimate.perBusinessDay.net.eq(lci.yieldEstimate.perBusinessDay.gross)).toBe(true); // isenta
+    expect(cx.yieldEstimate.remainingBusinessDays).toBe(7); // 20/11 é feriado
+    const sum = cx.yieldEstimate.monthProjection.net.plus(lci.yieldEstimate.monthProjection.net);
+    expect(s.yieldEstimate.monthProjection.net.eq(sum)).toBe(true); // arquivado fora
+    expect(s.yieldEstimate.perBusinessDay.gross.eq(cx.yieldEstimate.perBusinessDay.gross.plus(lci.yieldEstimate.perBusinessDay.gross))).toBe(true);
+
+    const other = await listFixedIncomeAssets(db, otherId, { asOf: "2026-11-19" });
+    expect(other.assets).toHaveLength(0);
+    expect(other.yieldEstimate.available).toBe(false);
+    expect(other.yieldEstimate.perBusinessDay.gross.isZero()).toBe(true);
+  });
+});

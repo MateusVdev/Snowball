@@ -12,12 +12,16 @@ import { getIntegrations } from "@/server/integrations/registry";
 import { listGoalStatuses } from "@/server/services/goals/goal-service";
 import { getOverview } from "@/server/services/overview/overview-service";
 import { listSimulations } from "@/server/services/simulation/simulation-service";
+import { listFixedIncomeSimulations } from "@/server/services/fixed-income/simulation-service";
+import { GOAL_METRIC_LABEL } from "@/domain/goals";
 
 export const metadata: Metadata = { title: "Metas financeiras" };
 
+// "Patrimônio" (metas antigas) continua sendo só FIIs; o patrimônio total é um tipo à parte.
 const METRIC_OPTIONS = [
   { value: "MONTHLY_INCOME", label: "Renda mensal (R$)" },
-  { value: "PATRIMONY", label: "Patrimônio (R$)" },
+  { value: "PATRIMONY", label: "Patrimônio — só FIIs (R$)" },
+  { value: "TOTAL_PATRIMONY", label: "Patrimônio total — FIIs + renda fixa (R$)" },
   { value: "TOTAL_SHARES", label: "Quantidade de cotas" },
   { value: "CUSTOM", label: "Objetivo personalizado" },
 ];
@@ -25,12 +29,14 @@ const METRIC_OPTIONS = [
 export default async function GoalsPage() {
   const user = await requireUser();
   const db = getDb();
-  const [overview, sims] = await Promise.all([
+  const [overview, sims, fiSims] = await Promise.all([
     getOverview(db, user.id, { staleAfterBusinessHours: getIntegrations().staleAfterBusinessHours }),
     listSimulations(db, user.id),
+    listFixedIncomeSimulations(db, user.id),
   ]);
   const goals = await listGoalStatuses(db, user.id, overview);
   const simOptions = [{ value: "", label: "Sem estimativa" }, ...sims.map((s) => ({ value: s.id, label: s.name }))];
+  const fiSimOptions = [{ value: "", label: "Nenhuma" }, ...fiSims.map((s) => ({ value: s.id, label: s.name }))];
 
   return (
     <div className="grid gap-6">
@@ -51,6 +57,7 @@ export default async function GoalsPage() {
                   <p className="flex items-center gap-1.5 text-muted-foreground">
                     Valor atual: {formatGoalValue(g.metric, g.current)} <InfoTip>{g.currentNote}</InfoTip>
                   </p>
+                  <p className="text-xs text-muted-foreground" data-testid="goal-metric">{GOAL_METRIC_LABEL[g.metric]}</p>
                   <p>
                     Estimativa:{" "}
                     {g.estimate ? (
@@ -77,7 +84,8 @@ export default async function GoalsPage() {
                         <Field name="metric" label="Tipo" as="select" defaultValue={g.metric} options={METRIC_OPTIONS} />
                         <Field name="target" label="Meta" inputMode="decimal" defaultValue={g.target.toFixed()} />
                         <Field name="customCurrent" label="Valor atual (só personalizada)" inputMode="decimal" defaultValue={g.customCurrent ?? ""} />
-                        <Field name="simulationId" label="Estimar com a simulação" as="select" defaultValue={g.simulation?.id ?? ""} options={simOptions} className="sm:col-span-2" />
+                        <Field name="simulationId" label="Estimar com a simulação (FIIs)" as="select" defaultValue={g.simulation?.id ?? ""} options={simOptions} />
+                        <Field name="fixedIncomeSimulationId" label="Simulação de renda fixa (só patrimônio total)" as="select" defaultValue={g.fixedIncomeSimulation?.id ?? ""} options={fiSimOptions} />
                       </div>
                     </ActionForm>
                     <ActionForm action={deleteGoalAction.bind(null, g.id)} submitLabel="Excluir meta" submitVariant="destructive">
@@ -95,8 +103,9 @@ export default async function GoalsPage() {
         <CardHeader>
           <CardTitle>Nova meta</CardTitle>
           <CardDescription>
-            Renda mensal usa a renda recorrente estimada (cotas atuais × último rendimento pago). Patrimônio usa o valor de mercado
-            atual. Para estimar o prazo, escolha uma simulação — por exemplo, uma criada a partir da sua carteira.
+            Renda mensal usa a renda recorrente estimada (cotas atuais × último rendimento pago). “Patrimônio — só FIIs” usa o valor de
+            mercado dos FIIs; “Patrimônio total” soma a renda fixa (valor bruto estimado). Para estimar o prazo, escolha uma simulação — por
+            exemplo, uma criada a partir da sua carteira; no patrimônio total, some também uma simulação de renda fixa.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -106,7 +115,8 @@ export default async function GoalsPage() {
               <Field name="metric" label="Tipo" as="select" defaultValue="MONTHLY_INCOME" options={METRIC_OPTIONS} />
               <Field name="target" label="Meta" inputMode="decimal" placeholder="100,00" />
               <Field name="customCurrent" label="Valor atual (só personalizada)" inputMode="decimal" />
-              <Field name="simulationId" label="Estimar com a simulação" as="select" defaultValue="" options={simOptions} className="sm:col-span-2" />
+              <Field name="simulationId" label="Estimar com a simulação (FIIs)" as="select" defaultValue="" options={simOptions} className="sm:col-span-2" />
+              <Field name="fixedIncomeSimulationId" label="Simulação de renda fixa (só patrimônio total)" as="select" defaultValue="" options={fiSimOptions} className="sm:col-span-2" />
             </div>
             {sims.length === 0 ? (
               <FormNote>

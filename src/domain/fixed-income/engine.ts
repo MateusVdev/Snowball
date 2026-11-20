@@ -97,6 +97,8 @@ export interface FixedIncomeResult {
   projectedBusinessDays: number;
   /** Dias úteis sem nenhuma taxa conhecida (não renderam). */
   missingBusinessDays: number;
+  /** Aportes ainda investidos na data (FIFO), com o valor bruto de cada um. */
+  openLots: { movementId: string; date: IsoDate; principal: FinDecimal; gross: FinDecimal }[];
 }
 
 export class FixedIncomeError extends Error {
@@ -108,7 +110,7 @@ export class FixedIncomeError extends Error {
 
 const ZERO = new FinDecimal(0);
 
-interface Lot {
+export interface Lot {
   movementId: string;
   date: IsoDate;
   principal: FinDecimal;
@@ -204,7 +206,8 @@ function lotAt(lot: Lot, date: IsoDate, idx: DailyIndex, taxExempt: boolean) {
   return { gross, iof, incomeTax, net: gross.minus(iof).minus(incomeTax) };
 }
 
-function valueLots(lots: readonly Lot[], date: IsoDate, idx: DailyIndex, taxExempt: boolean): Valuation {
+/** Valor bruto, tributos e líquido de um conjunto de aportes na data `date`. */
+export function valueLots(lots: readonly Lot[], date: IsoDate, idx: DailyIndex, taxExempt: boolean): Valuation {
   let principal = ZERO;
   let gross = ZERO;
   let iof = ZERO;
@@ -278,7 +281,7 @@ export function computeFixedIncome(input: {
     return {
       asOf, current: empty, totalDeposited: ZERO, totalWithdrawnNet: ZERO, totalWithdrawnGross: ZERO,
       accumulatedEarnings: ZERO, monthEarnings: ZERO, withdrawals: [], months: [], ratesKnownUntil: knownUntil,
-      projectedBusinessDays: 0, missingBusinessDays: 0,
+      projectedBusinessDays: 0, missingBusinessDays: 0, openLots: [],
     };
   }
 
@@ -353,5 +356,11 @@ export function computeFixedIncome(input: {
     ratesKnownUntil: idx.knownUntil,
     projectedBusinessDays: flags.projected,
     missingBusinessDays: flags.missing,
+    openLots: lots.map((lot) => ({
+      movementId: lot.movementId,
+      date: lot.date,
+      principal: lot.principal,
+      gross: lot.principal.times(idx.factor(lot.date, asOf)),
+    })),
   };
 }

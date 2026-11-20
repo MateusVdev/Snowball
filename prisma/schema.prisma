@@ -27,16 +27,17 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions          Session[]
-  funds             Fund[]
-  operations        Operation[]
-  auditEvents       AuditEvent[]
-  dividendEvents    DividendEvent[]
-  dividendReceipts  DividendReceipt[]
-  settings          UserSettings?
-  simulations       Simulation[]
-  goals             FinancialGoal[]
-  fixedIncomeAssets FixedIncomeAsset[]
+  sessions               Session[]
+  funds                  Fund[]
+  operations             Operation[]
+  auditEvents            AuditEvent[]
+  dividendEvents         DividendEvent[]
+  dividendReceipts       DividendReceipt[]
+  settings               UserSettings?
+  simulations            Simulation[]
+  goals                  FinancialGoal[]
+  fixedIncomeAssets      FixedIncomeAsset[]
+  fixedIncomeSimulations FixedIncomeSimulation[]
 
   @@map("users")
 }
@@ -467,31 +468,36 @@ model SimulationVersion {
 enum GoalMetric {
   /// Renda mensal recorrente (cotas atuais × último rendimento oficial pago).
   MONTHLY_INCOME
-  /// Valor de mercado da carteira.
+  /// Valor de mercado da carteira de FIIs (só FIIs — padrão das metas antigas).
   PATRIMONY
   /// Total de cotas em carteira.
   TOTAL_SHARES
   /// Objetivo personalizado: valor atual informado pelo usuário.
   CUSTOM
+  /// Patrimônio total: FIIs (valor de mercado) + renda fixa (bruto estimado).
+  TOTAL_PATRIMONY
 
   @@map("goal_metric")
 }
 
 model FinancialGoal {
-  id            String     @id @default(cuid())
-  userId        String     @map("user_id")
-  name          String
-  metric        GoalMetric
-  target        Decimal    @db.Decimal(20, 2)
+  id                      String     @id @default(cuid())
+  userId                  String     @map("user_id")
+  name                    String
+  metric                  GoalMetric
+  target                  Decimal    @db.Decimal(20, 2)
   /// Apenas para CUSTOM: valor atual informado manualmente.
-  customCurrent Decimal?   @map("custom_current") @db.Decimal(20, 2)
+  customCurrent           Decimal?   @map("custom_current") @db.Decimal(20, 2)
   /// Simulação cujas premissas estimam o prazo (opcional).
-  simulationId  String?    @map("simulation_id")
-  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  simulationId            String?    @map("simulation_id")
+  /// Simulação de renda fixa somada à de FIIs na estimativa (só TOTAL_PATRIMONY; opcional).
+  fixedIncomeSimulationId String?    @map("fixed_income_simulation_id")
+  createdAt               DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  simulation Simulation? @relation(fields: [simulationId], references: [id], onDelete: SetNull)
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  simulation            Simulation?            @relation(fields: [simulationId], references: [id], onDelete: SetNull)
+  fixedIncomeSimulation FixedIncomeSimulation? @relation(fields: [fixedIncomeSimulationId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@map("financial_goals")
@@ -605,4 +611,23 @@ model IndexSyncStatus {
   updatedAt     DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("index_sync_status")
+}
+
+/// Simulação de renda fixa com aportes mensais (independente da carteira real).
+model FixedIncomeSimulation {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  /// Parâmetros validados por Zod (valor inicial, aporte, prazo, rentabilidade, CDI, isenção).
+  config    Json
+  /// Resumo do último cálculo (para listagens).
+  summary   Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goals FinancialGoal[]
+
+  @@index([userId])
+  @@map("fixed_income_simulations")
 }

@@ -5,6 +5,7 @@ import { ArrowLeft, Pencil } from "lucide-react";
 import { SeriesLineChart } from "@/components/charts/series-line-chart";
 import { ActionForm, CheckboxField, Field, FormNote } from "@/components/forms/action-form";
 import { EstimateNotice } from "@/components/fixed-income/estimate-notice";
+import { YieldEstimateCard } from "@/components/fixed-income/yield-estimate";
 import { PageHeader, Stat } from "@/components/portfolio/page-header";
 import { Money } from "@/components/portfolio/values";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +90,8 @@ export default async function FixedIncomeDetailPage({ params }: PageProps<"/rend
         <Stat label="IOF estimado" hint="Só nos primeiros 29 dias de cada aporte"><Money value={r.current.iof} /></Stat>
         <Stat label="Rendimento" hint={<>No mês: <Money value={r.monthEarnings} signed /></>}><Money value={r.accumulatedEarnings} signed /></Stat>
       </section>
+
+      <YieldEstimateCard estimate={asset.yieldEstimate} />
 
       <Card>
         <CardHeader>

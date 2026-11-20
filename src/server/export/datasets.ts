@@ -7,7 +7,7 @@ import { fromIso } from "@/domain/fixed-income/calendar";
 import { date, num, text, type Dataset } from "./tabular";
 
 /** Conjuntos de dados exportáveis (sempre filtrados pelo usuário autenticado). */
-export const DATASET_KEYS = ["carteira", "operacoes", "cotacoes", "proventos", "recebimentos", "simulacoes", "renda-fixa", "renda-fixa-movimentos"] as const;
+export const DATASET_KEYS = ["carteira", "operacoes", "cotacoes", "proventos", "recebimentos", "simulacoes", "renda-fixa", "renda-fixa-movimentos", "simulacoes-renda-fixa"] as const;
 export type DatasetKey = (typeof DATASET_KEYS)[number];
 
 export const DATASET_LABELS: Record<DatasetKey, string> = {
@@ -19,6 +19,7 @@ export const DATASET_LABELS: Record<DatasetKey, string> = {
   simulacoes: "Simulações",
   "renda-fixa": "Renda fixa",
   "renda-fixa-movimentos": "Renda fixa — movimentos",
+  "simulacoes-renda-fixa": "Simulações de renda fixa",
 };
 
 const m2 = (v: { toDecimalPlaces(n: number): { toFixed(n: number): string } }) => v.toDecimalPlaces(2).toFixed(2);
@@ -112,6 +113,23 @@ export async function buildDataset(db: Database, userId: string, key: DatasetKey
             num(m2(r.totalDeposited)), num(m2(r.current.principal)), num(m2(r.current.gross)), num(m2(r.current.iof)), num(m2(r.current.incomeTax)),
             num(m2(r.current.net)), num(m2(r.monthEarnings)), num(m2(r.accumulatedEarnings)), date(r.ratesKnownUntil ? fromIso(r.ratesKnownUntil) : null),
             date(a.archivedAt, true), text(a.notes),
+          ];
+        }),
+      };
+    }
+    case "simulacoes-renda-fixa": {
+      const sims = await db.fixedIncomeSimulation.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
+      return {
+        name: DATASET_LABELS["simulacoes-renda-fixa"],
+        columns: ["Nome", "Valor inicial", "Aporte mensal", "Prazo (meses)", "Rentabilidade", "CDI anual estimado", "Isento de IR", "Total aplicado", "Bruto final", "IR estimado", "Líquido final", "Atualizada em"],
+        rows: sims.map((s) => {
+          const c = (s.config ?? {}) as Record<string, string | number | boolean | null>;
+          const sum = (s.summary ?? {}) as Record<string, string | number>;
+          const rate = c.rateMode === "ANNUAL_FIXED" ? `${String(c.annualRatePercent ?? "").replace(".", ",")}% a.a.` : `${String(c.cdiPercent ?? "").replace(".", ",")}% do CDI`;
+          return [
+            text(s.name), num(c.initialAmount as string), num(c.monthlyContribution as string), num(c.months as number), text(rate),
+            num(c.rateMode === "CDI_PERCENT" ? (c.cdiAnnualPercent as string) : null), text(c.taxExempt ? "sim" : "não"),
+            num(sum.totalApplied ?? null), num(sum.gross ?? null), num(sum.incomeTax ?? null), num(sum.net ?? null), date(s.updatedAt, true),
           ];
         }),
       };
