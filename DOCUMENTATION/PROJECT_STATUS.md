@@ -13,7 +13,48 @@
 | 4 | Motor de simulação Bola de Neve | ✅ Concluída (2026-11-20) |
 | 5 | Dashboard, experiência visual e finalização | ✅ Concluída (2026-11-20) |
 | RF-1 | Renda fixa — Parte 1: modelo, índices do Banco Central, calendário e motor de cálculo | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
-| RF-2 | Renda fixa — Parte 2: telas, dashboard por classe, exportação/backup/restauração | ⏳ Não iniciada |
+| RF-2 | Renda fixa — Parte 2: telas, exportação, backup e restauração | ✅ Concluída (2026-11-20) — branch `feature/renda-fixa`, sem merge |
+| RF-3 | Renda fixa — Parte 3 | ⏳ Não iniciada |
+
+---
+
+## Renda fixa — Parte 2 (telas, exportação, backup)
+
+### Entregue
+
+- Menu "Renda fixa" (`/renda-fixa`): resumo (aplicado, bruto, líquido,
+  rendimento do mês), lista com nome, emissor, "115% do CDI", aplicado, bruto,
+  líquido e rendimento do mês; filtro de arquivados; botão "Atualizar índices
+  do Banco Central".
+- "Adicionar título" (`/renda-fixa/novo`): LCI/LCA marcam "Isento de IR"
+  automaticamente (editável); Tesouro Selic escolhe o indexador Selic; aporte
+  inicial opcional com data aproximada.
+- Detalhe (`/renda-fixa/[id]`): posição estimada (aplicado, bruto, líquido, IR,
+  IOF, rendimento), novo aporte/resgate (resgate = valor líquido do extrato),
+  tabela de movimentos com bruto equivalente dos resgates, editar e excluir
+  (exclusão com confirmação), evolução mês a mês em gráfico (Recharts, padrão
+  do projeto) e tabela, marcação de "projeção".
+- Edição do título e arquivamento (com confirmação) / restauração.
+- Aviso fixo em todas as telas: valores estimados com base no CDI/Selic oficial
+  do Banco Central; mostra "índices atualizados até DD/MM/AAAA".
+- Índices: atualizados ao abrir as telas (no máximo 1×/hora, limite de 8 s) e
+  pelo botão.
+- Exportação ("Renda fixa", "Renda fixa — movimentos", e no "Exportar tudo"),
+  backup e restauração com renda fixa (backups antigos continuam válidos).
+- Nenhuma migração nova; nenhuma variável de ambiente nova.
+
+### Testes executados (2026-11-20)
+
+Ver o relatório da Parte 2. Novos: 5 testes de integração
+(`fixed-income-backup.test.ts`): ida e volta do backup com valores idênticos,
+backup antigo sem renda fixa, recusas (conta com renda fixa, arquivo
+adulterado, movimento órfão, tipo inválido — sem gravar nada), isolamento por
+usuário na exportação/backup e disparo da atualização de índices.
+
+### Pendente (Parte 3)
+
+Patrimônio por classe de ativo no dashboard (FIIs + renda fixa), status
+"Banco Central (CDI/Selic)" na Central de dados, E2E da "Caixinha Turbo".
 
 ---
 

@@ -464,3 +464,14 @@ bruto equivalente é maior que R$ 600 e o segundo aporte fica intacto.
 - **Evolução mês a mês**: posição no 1º dia do mês seguinte (ou na data de
   cálculo, no mês corrente), com aportes, resgates e sinalização de projeção.
   A soma dos rendimentos mensais é igual ao acumulado.
+
+### Exportação, backup e restauração
+
+- Exportação: conjuntos "Renda fixa" (títulos com valores estimados na data) e
+  "Renda fixa — movimentos" (resgates com bruto equivalente, IOF e IR estimados),
+  em CSV/Excel e no "Exportar tudo".
+- Backup: inclui títulos e movimentos (`fixedIncomeAssets`, `fixedIncomeMovements`).
+  As taxas do CDI/Selic não entram (são públicas e buscadas de novo).
+- Restauração: os campos de renda fixa são opcionais, então backups antigos
+  continuam válidos. Uma conta que já tem renda fixa conta como "com dados"
+  (restauração recusada). Movimentos são gravados na ordem original de registro.

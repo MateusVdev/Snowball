@@ -48,6 +48,8 @@ src/
                          edição/remoção (arquivamento) e saldo inicial
       operacoes/         Histórico com filtros, nova operação e detalhe
                          (correção, cancelamento, trilha de auditoria)
+      renda-fixa/        Lista de títulos, novo título, detalhe (aportes/resgates,
+                         evolução mensal) e edição/arquivamento
     api/health/          Health check público (sem dados sensíveis)
     layout.tsx, page.tsx Layout raiz; "/" redireciona para /dashboard
   components/
@@ -55,9 +57,11 @@ src/
     layout/              Componentes estruturais (cabeçalho etc.)
     forms/               ActionForm/Field: formulários ligados a Server Actions
     portfolio/           Exibição de valores, tabela de operações, prévia de operação
+    fixed-income/        Campos do título (LCI/LCA → isento) e aviso de estimativa
   domain/                Regras de negócio e cálculos PUROS (sem I/O, sem React)
     money.ts             Decimal, escalas, arredondamento, formatação, parse pt-BR
     dates.ts             Datas de calendário (pregão) e fuso de São Paulo
+    fixed-income/        Renda fixa: calendário de feriados, IR/IOF, motor de cálculo, rótulos
     portfolio/ledger.ts  Livro-razão: saldo inicial, compra, venda, PM, realizado
     portfolio/metrics.ts Métricas da posição e consolidação da carteira
     portfolio/history.ts Evolução mensal (investido × mercado), aportes, distribuição

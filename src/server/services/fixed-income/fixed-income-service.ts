@@ -341,14 +341,14 @@ export async function listFixedIncomeAssets(
 }
 
 /**
- * Data mais antiga de movimento por indexador (de todos os usuários), usada
- * para decidir desde quando o cache de índices precisa existir.
+ * Data mais antiga de movimento por indexador (do usuário, ou de todos se
+ * omitido), usada para decidir desde quando o cache de índices precisa existir.
  */
-export async function earliestMovementByIndexer(db: Database) {
+export async function earliestMovementByIndexer(db: Database, userId?: string) {
   const out: Partial<Record<RateIndexer, IsoDate>> = {};
   for (const indexer of ["CDI", "SELIC"] as const) {
     const first = await db.fixedIncomeMovement.findFirst({
-      where: { asset: { indexer } },
+      where: { asset: { indexer }, ...(userId ? { userId } : {}) },
       orderBy: { date: "asc" },
       select: { date: true },
     });

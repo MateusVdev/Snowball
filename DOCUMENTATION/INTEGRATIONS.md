@@ -133,8 +133,10 @@ Cache (`src/server/services/fixed-income/index-rate-service.ts`):
 - API fora do ar: o cache continua valendo e o cálculo usa a última taxa
   conhecida como projeção ("índices atualizados até DD/MM").
 - Respeita `INTEGRATIONS_ENABLED` (desligado = nenhuma busca).
-- Parte 1 entrega o serviço; o disparo (tela/cron) e o status na Central de
-  dados entram na Parte 2.
+- Disparo: ao abrir as telas de renda fixa (`ensureIndexRates`, só desde o
+  primeiro movimento do usuário, com limite de 8 s para não travar a página) e
+  pelo botão "Atualizar índices do Banco Central" (ignora o intervalo de 1 h).
+  Sem títulos, nada é buscado.
 
 ## CVM — dados abertos (avaliada, não usada)
 

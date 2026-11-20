@@ -148,6 +148,11 @@ export function Field(props: FieldProps) {
   );
 }
 
+/** Estado do formulário (valores preservados e erros) para campos personalizados. */
+export function useActionFormState() {
+  return useContext(FormContext);
+}
+
 /** Campo oculto (ex.: ids). */
 export function HiddenField({ name, value }: { name: string; value: string }) {
   return <input type="hidden" name={name} value={value} />;
