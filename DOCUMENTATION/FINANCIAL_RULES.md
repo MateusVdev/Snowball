@@ -20,8 +20,11 @@ e para os testes que a verificam.
 | Resultado realizado | ✅ Etapa 2 | `src/domain/portfolio/ledger.ts` | idem |
 | Posição, valor atual, não realizado, rentabilidade | ✅ Etapa 2 | `src/domain/portfolio/metrics.ts` | `tests/unit/metrics.test.ts`, E2E |
 | Consolidação da carteira | ✅ Etapa 2 | `src/domain/portfolio/metrics.ts` | `metrics.test.ts` |
-| Proventos recebidos | 📋 Definida, não implementada | — | — |
-| Indicadores (DY, YoC) | 📋 Definida, não implementada | — | — |
+| Quantidade elegível na data-com | ✅ Etapa 3 | `src/domain/dividends.ts` | `tests/unit/dividends.test.ts`, integração, E2E |
+| Valor do provento e status (anunciado/pago/previsto/recebido) | ✅ Etapa 3 | `src/domain/dividends.ts` | idem |
+| Histórico de renda (mensal, anual, 12m, médias, por fundo) | ✅ Etapa 3 | `src/domain/dividends.ts` | idem |
+| Dividend yield 12m e yield on cost | ✅ Etapa 3 | `src/domain/dividends.ts` | idem |
+| Cotação atual e desatualizada | ✅ Etapa 3 | `src/domain/quotes.ts`, `fund-service.ts` | `tests/unit/quote-freshness.test.ts`, integração |
 | Eventos corporativos (desdobramento, grupamento, amortização) | ⏳ A definir | — | — |
 | Simulador de reinvestimento | ⏳ A definir na etapa do simulador | — | — |
 | Tributação | ⚠️ Validar em fonte oficial antes de implementar | — | — |
@@ -47,6 +50,7 @@ e para os testes que a verificam.
 | -------- | ------ | ------ | --- |
 | Valor em reais | 2 | `Decimal(18, 2)` | taxas, valor bruto/líquido, custo vendido e resultado de cada venda |
 | Preço unitário | 8 | `Decimal(18, 8)` | preço da operação, preço médio, cotação |
+| Provento por cota | 10 | `Decimal(20, 10)` | documentos oficiais trazem até 9 casas (ex.: 0,308363541) |
 | Quantidade de cotas | 8 | `Decimal(18, 8)` | hoje validada como **inteira** (FIIs negociam cotas inteiras) |
 | Custo total e realizado acumulado (cache da posição) | 12 | `Decimal(30, 12)` | evita perda de precisão entre vendas parciais |
 | Taxas e percentuais (fração) | 10 | `Decimal(18, 10)` | reservado |
@@ -168,21 +172,67 @@ Carteira inicial informada (cotações manuais):
   reprocessamento completo; se o histórico ficar inconsistente, nada é gravado.
 - Fundos não são excluídos: "remover" = arquivar, exigindo posição zerada.
 
+## Proventos (Etapa 3)
+
+### Natureza e status
+
+| Status exibido | Regra |
+| -------------- | ----- |
+| **Anunciado** | evento oficial (fonte oficial/brapi ou cadastro manual "anunciado") com pagamento futuro ou sem data |
+| **Pago pelo fundo** | evento oficial cuja data de pagamento já chegou |
+| **Previsto (estimativa)** | cadastrado pelo usuário como previsão; nunca exibido como anúncio, não pode ser "recebido" |
+| **Recebido e registrado** | existe um recebimento ativo registrado pelo usuário para o evento |
+
+Sem anúncio oficial com pagamento futuro para um fundo: **"Aguardando divulgação."**
+
+### Quantidade elegível
+
+- Tem direito quem possui a cota **ao final da data-com**.
+- Quantidade elegível = posição após reprocessar apenas as operações ativas com data de pregão **≤ data-com**:
+  - compra na data-com conta;
+  - venda na data-com tira o direito.
+- **Nunca** se usa a quantidade atual retroativamente.
+- **Saldo inicial** (sem data de aquisição): só é considerado para datas-com **a partir do dia em que foi registrado** (primeiro registro, mesmo que depois corrigido). Para datas-com anteriores, a elegibilidade é **desconhecida**. O recebimento só pode ser registrado se o usuário informar a quantidade (origem "MANUAL").
+
+### Valores
+
+- Valor do provento = `round2(quantidade elegível × valor por cota)`, com half-up. Usa-se o valor pago na data (`rawRate` da brapi, `ValorProvento` da B3), sem ajuste por desdobramento.
+- Amortizações são registradas, mas **não** entram em renda nem em dividend yield (são devolução de capital).
+- Ainda **não** reduzem o custo médio da posição; é uma pendência para a etapa de eventos corporativos.
+
+### Histórico de renda (`summarizeIncome`)
+
+Considera os recebimentos registrados de **rendimentos**, pela data de pagamento, até hoje.
+
+| Indicador | Fórmula |
+| --------- | ------- |
+| Total recebido | Σ recebimentos |
+| Últimos 12 meses | Σ com pagamento **após** (hoje − 12 meses) e até hoje |
+| Renda passiva mensal | últimos 12 meses ÷ 12 |
+| Média mensal desde o início | total ÷ nº de meses corridos do 1º recebimento até o mês atual (inclusive) |
+| Histórico mensal/anual | soma por mês/ano de pagamento; meses sem recebimento aparecem com zero |
+| Por fundo | total e últimos 12 meses por fundo |
+
+### Dividend yield (`dividendYield12m`)
+
+- **DY 12m** = Σ rendimentos por cota **oficiais** com pagamento nos últimos 12 meses ÷ cotação atual.
+- **Yield on cost 12m** = mesma soma ÷ preço médio.
+- **Dados insuficientes** (DY exibido como indisponível):
+  - nenhum rendimento oficial registrado;
+  - o histórico registrado começa depois de (hoje − 11 meses);
+  - não há cotação.
+- Previsões e amortizações nunca entram.
+
+### Prevenção de duplicidade
+
+- **Evento:** no máximo um ativo por fundo + natureza + tipo + data-com + data de pagamento (índice único). Na importação:
+  - mesmo valor = ignorado;
+  - valor ou pagamento diferente = **divergência**: é registrada no log e nada é sobrescrito;
+  - fonte que divulga a data de pagamento de um evento antes sem data → o anterior é anulado com motivo e o novo é registrado.
+- **Pagamento duplicado:** no máximo um recebimento ativo por evento (índice único).
+- Eventos e recebimentos não são excluídos nem alterados (triggers); corrigir = anular com motivo e registrar de novo.
+
 ## Definições ainda não implementadas
-
-### Proventos
-
-- O direito ao provento é de quem detém a cota ao final da **data com**; o
-  pagamento ocorre na **data de pagamento**. Ambas as datas serão armazenadas.
-- `provento_recebido = quantidade_na_data_com × valor_por_cota`, arredondado a
-  2 casas apenas no valor total. A quantidade na data com virá do ledger.
-
-### Indicadores
-
-- **Dividend Yield (DY) de N meses** = soma dos proventos por cota pagos nos
-  últimos N meses ÷ cotação de referência. A janela (N) e a data da cotação
-  devem sempre ser exibidas junto ao número.
-- **Yield on Cost (YoC)** = proventos por cota no período ÷ preço médio.
 
 ### Eventos corporativos
 

@@ -52,6 +52,8 @@ src/
     dates.ts             Datas de calendário (pregão) e fuso de São Paulo
     portfolio/ledger.ts  Livro-razão: saldo inicial, compra, venda, PM, realizado
     portfolio/metrics.ts Métricas da posição e consolidação da carteira
+    dividends.ts         Elegibilidade na data-com, status, renda, DY, competência
+    quotes.ts            Atualidade da cotação (horas úteis)
   generated/prisma/      Cliente Prisma gerado (ignorado pelo Git)
   lib/                   Utilitários genéricos de UI (cn)
   server/                Código exclusivo do servidor
@@ -61,6 +63,12 @@ src/
     actions/             Server Actions (formulários) — validam, chamam serviços
     services/            Serviços de aplicação (casos de uso)
       portfolio/         fund-service, operation-service, ledger-sync
+      market/            cotações, histórico, dados cadastrais, sync-log, auto-refresh
+      dividends/         eventos, recebimentos, elegibilidade, importação
+    integrations/        Provedores externos (ver INTEGRATIONS.md)
+      types.ts           PriceProvider, DividendProvider, AssetInformationProvider
+      brapi/, b3/        Implementações (brapi; B3 FundosNET)
+      http.ts, limiter.ts, cache.ts, errors.ts, registry.ts
       audit.ts, errors.ts
     integrations/        Clientes de APIs externas — próximas etapas
   validation/            Schemas Zod compartilhados (formulários, APIs)
@@ -120,7 +128,12 @@ tests/
 | `operations`     | Movimentações: `INITIAL_BALANCE`, `BUY`, `SELL`; status `ACTIVE`/`CANCELED`/`SUPERSEDED`; campos derivados do ledger |
 | `positions`      | Cache da posição por fundo (quantidade, custo total, realizado), regravado na mesma transação |
 | `price_quotes`   | Histórico de cotações (`source = MANUAL` nesta etapa), com data de referência opcional |
-| `audit_events`   | Trilha de auditoria somente-inserção (fundos, operações, cotações) |
+| `audit_events`   | Trilha de auditoria somente-inserção (fundos, operações, cotações, proventos) |
+| `daily_prices`   | Fechamentos diários importados (único por fundo/data/fonte) |
+| `dividend_events` | Proventos: natureza (oficial/previsão), tipo (rendimento/amortização), fonte, valor/cota, data-com, pagamento, competência |
+| `dividend_receipts` | Recebimentos registrados: quantidade elegível (histórico ou manual), valor total |
+| `sync_runs`      | Registro de cada atualização (tipo, provedor, gatilho, status, detalhes) |
+| `user_settings`  | Atualização automática (ligada, intervalos) |
 
 ### Integridade da carteira
 

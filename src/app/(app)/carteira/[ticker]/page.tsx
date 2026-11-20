@@ -22,6 +22,16 @@ import { requireUser } from "@/server/auth/dal";
 import { getDb } from "@/server/db/client";
 import { getFundByTicker, listQuotes } from "@/server/services/portfolio/fund-service";
 import { listFundOperations } from "@/server/services/portfolio/operation-service";
+import { getIntegrations } from "@/server/integrations/registry";
+import { listDailyPrices } from "@/server/services/market/quote-service";
+import { listDividendEvents } from "@/server/services/dividends/dividend-service";
+import { dividendYield12m } from "@/domain/dividends";
+import { todayIsoDate } from "@/domain/dates";
+import { formatBRL, toDecimal } from "@/domain/money";
+import { formatDate } from "@/domain/dates";
+import { PriceHistoryChart } from "@/components/charts/price-history-chart";
+import { DividendEventsTable } from "@/components/dividends/events-table";
+import { refreshPriceHistoryAction, refreshQuotesAction } from "@/server/actions/market";
 
 export async function generateMetadata({ params }: PageProps<"/carteira/[ticker]">): Promise<Metadata> {
   const { ticker } = await params;
@@ -32,15 +42,31 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
   const user = await requireUser();
   const { ticker } = await params;
   const db = getDb();
-  const fund = await getFundByTicker(db, user.id, decodeURIComponent(ticker));
+  const integrations = getIntegrations();
+  const stale = { staleAfterBusinessHours: integrations.staleAfterBusinessHours };
+  const fund = await getFundByTicker(db, user.id, decodeURIComponent(ticker), stale);
   if (!fund) notFound();
   // URL canônica em maiúsculas (ex.: /carteira/mxrf11 → /carteira/MXRF11).
   if (fund.ticker !== ticker) redirect(`/carteira/${fund.ticker}`);
 
-  const [operations, quotes] = await Promise.all([
+  const todayIso = todayIsoDate();
+  const [operations, quotes, prices, events] = await Promise.all([
     listFundOperations(db, user.id, fund.fundId),
-    listQuotes(db, user.id, fund.fundId),
+    listQuotes(db, user.id, fund.fundId, stale),
+    listDailyPrices(db, user.id, fund.fundId),
+    listDividendEvents(db, user.id, { fundId: fund.fundId, todayIso }),
   ]);
+  const dy = dividendYield12m(
+    events,
+    fund.metrics.currentPrice?.toFixed() ?? null,
+    fund.metrics.averagePrice?.toFixed() ?? null,
+    todayIso,
+  );
+  const pricePoints = prices.map((p) => ({
+    label: formatDate(p.date).slice(0, 5),
+    close: toDecimal(p.close).toNumber(), // apenas para posicionar no gráfico
+    formatted: formatBRL(p.close),
+  }));
   const m = fund.metrics;
   const hasActiveInitial = operations.some((o) => o.type === "INITIAL_BALANCE" && o.status === "ACTIVE");
   const archived = Boolean(fund.archivedAt);
@@ -56,7 +82,14 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
         }
         description={
           <>
-            {fund.name ?? "Nome não informado"} · {fund.segment ?? "Segmento não informado"}
+            {fund.name ?? "Nome não informado"} · {fund.segment ?? "Segmento não informado"} ·{" "}
+            {fund.cnpj ? `CNPJ ${fund.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5")}` : "CNPJ não informado"}
+            {integrations.enabled ? (
+              <>
+                {" · "}
+                <Link className="underline" href={`/carteira/${fund.ticker}/dados-externos`}>Consultar dados cadastrais</Link>
+              </>
+            ) : null}
           </>
         }
         actions={
@@ -91,8 +124,13 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
           hint={
             fund.quote ? (
               <span className="flex flex-wrap items-center gap-1">
-                <QuoteSourceBadge recordedAt={fund.quote.recordedAt} referenceDate={fund.quote.referenceDate} />
-                {fund.quote.referenceDate ? (
+                <QuoteSourceBadge quote={fund.quote} />
+                {fund.quote.changePercent ? (
+                  <>dia <Percent value={toDecimal(fund.quote.changePercent).dividedBy(100)} />{" "}</>
+                ) : null}
+                {fund.quote.source !== "MANUAL" ? (
+                  <>de <Timestamp value={fund.quote.asOf} /></>
+                ) : fund.quote.referenceDate ? (
                   <>ref. <CalendarDate value={fund.quote.referenceDate} /></>
                 ) : (
                   <>registrada em <Timestamp value={fund.quote.recordedAt} /></>
@@ -110,6 +148,49 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
         <Stat label="Rentabilidade" hint="Não realizado ÷ capital investido"><Percent value={m.unrealizedReturn} /></Stat>
         <Stat label="Resultado realizado" hint="Vendas registradas"><Money value={m.realizedResult} signed /></Stat>
       </section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Proventos do fundo</CardTitle>
+            <CardDescription>
+              DY 12m:{" "}
+              {dy.dividendYield12m ? <Percent value={dy.dividendYield12m} /> : <span>indisponível ({dy.insufficientReason})</span>}
+              {" · "}Yield on cost 12m: {dy.yieldOnCost12m ? <Percent value={dy.yieldOnCost12m} /> : "indisponível"}
+              {" · "}Σ 12m por cota: <UnitPrice value={dy.sumPerShare12m} /> ({dy.eventsCount} pagamento(s))
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <DividendEventsTable events={events.slice(0, 8)} showFund={false} />
+            <p className="mt-2 text-sm">
+              <Link className="underline" href={`/proventos?fundo=${fund.ticker}`}>Ver todos os proventos</Link>
+              {" · "}
+              <Link className="underline" href={`/proventos/novo?fundo=${fund.ticker}`}>Registrar provento</Link>
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Fechamentos diários</CardTitle>
+            <CardDescription>
+              Histórico da brapi (disponível conforme o plano; sem chave, só fundos de teste). {prices.length} dia(s) registrados.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <PriceHistoryChart data={pricePoints} />
+            {integrations.enabled && !archived ? (
+              <div className="flex flex-wrap gap-4">
+                <ActionForm action={refreshQuotesAction} submitLabel="Atualizar cotação" submitVariant="outline" testId="refresh-quote-form">
+                  <span className="sr-only">Atualizar cotações</span>
+                </ActionForm>
+                <ActionForm action={refreshPriceHistoryAction} submitLabel="Importar histórico (90 dias)" submitVariant="outline">
+                  <span className="sr-only">Importar histórico</span>
+                </ActionForm>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>
@@ -171,9 +252,10 @@ export default async function FundPage({ params }: PageProps<"/carteira/[ticker]
                   <li key={q.id} className="flex flex-wrap items-center justify-between gap-2 border-b pb-2 last:border-0">
                     <span className="flex items-center gap-2">
                       <UnitPrice value={q.price} />
-                      <QuoteSourceBadge recordedAt={q.recordedAt} referenceDate={q.referenceDate} />
+                      <QuoteSourceBadge quote={q} />
                     </span>
                     <span className="text-muted-foreground">
+                      {q.source !== "MANUAL" ? <>mercado <Timestamp value={q.asOf} /> · </> : null}
                       {q.referenceDate ? <>ref. <CalendarDate value={q.referenceDate} /> · </> : null}
                       registrada em <Timestamp value={q.recordedAt} />
                       {q.note ? ` · ${q.note}` : ""}

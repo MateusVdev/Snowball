@@ -20,6 +20,7 @@ import {
   type ManualQuoteFormInput,
   type ManualQuoteInput,
 } from "@/validation/portfolio";
+import { isQuoteStale, quoteAsOf } from "@/domain/quotes";
 import { recordAudit } from "../audit";
 import { ServiceError } from "../errors";
 import { dec, lockFund, rebuildFundLedger } from "./ledger-sync";
@@ -32,10 +33,17 @@ import { dec, lockFund, rebuildFundLedger } from "./ledger-sync";
 export interface QuoteView {
   id: string;
   price: string;
-  source: "MANUAL";
+  source: "MANUAL" | "BRAPI" | "BRAPI_DAILY_CLOSE";
   referenceDate: Date | null;
   note: string | null;
   recordedAt: Date;
+  marketTime: Date | null;
+  previousClose: string | null;
+  change: string | null;
+  changePercent: string | null;
+  /** Instante a que a cotação se refere (mercado, referência ou registro). */
+  asOf: Date;
+  stale: boolean;
 }
 
 export interface FundPositionView {
@@ -43,6 +51,7 @@ export interface FundPositionView {
   ticker: string;
   name: string | null;
   segment: string | null;
+  cnpj: string | null;
   notes: string | null;
   archivedAt: Date | null;
   quote: QuoteView | null;
@@ -56,14 +65,26 @@ export interface PortfolioView {
 
 const fundWithPositionInclude = {
   position: true,
-  quotes: { orderBy: { recordedAt: "desc" }, take: 1 },
+  // Últimas leituras; a "atual" é a de referência mais recente (ver pickCurrentQuote).
+  quotes: { orderBy: { recordedAt: "desc" }, take: 10 },
 } satisfies Prisma.FundInclude;
+
+export interface QuoteViewOptions {
+  now?: Date;
+  staleAfterBusinessHours?: number;
+}
 
 type FundWithPosition = Prisma.FundGetPayload<{
   include: typeof fundWithPositionInclude;
 }>;
 
-function toQuoteView(quote: FundWithPosition["quotes"][number]): QuoteView {
+function toQuoteView(quote: FundWithPosition["quotes"][number], opts: QuoteViewOptions = {}): QuoteView {
+  const freshness = {
+    source: quote.source,
+    marketTime: quote.marketTime,
+    referenceDate: quote.referenceDate,
+    recordedAt: quote.recordedAt,
+  };
   return {
     id: quote.id,
     price: quote.price.toString(),
@@ -71,16 +92,34 @@ function toQuoteView(quote: FundWithPosition["quotes"][number]): QuoteView {
     referenceDate: quote.referenceDate,
     note: quote.note,
     recordedAt: quote.recordedAt,
+    marketTime: quote.marketTime,
+    previousClose: quote.previousClose?.toString() ?? null,
+    change: quote.change?.toString() ?? null,
+    changePercent: quote.changePercent?.toString() ?? null,
+    asOf: quoteAsOf(freshness),
+    stale: isQuoteStale(freshness, opts.now ?? new Date(), opts.staleAfterBusinessHours ?? 24),
   };
 }
 
-function toPositionView(fund: FundWithPosition): FundPositionView {
-  const quote = fund.quotes[0] ? toQuoteView(fund.quotes[0]) : null;
+/** Cotação atual = a que se refere ao instante mais recente (empate: a última registrada). */
+export function pickCurrentQuote(quotes: FundWithPosition["quotes"], opts: QuoteViewOptions = {}) {
+  const views = quotes.map((q) => toQuoteView(q, opts));
+  return views.reduce<QuoteView | null>((best, q) => {
+    if (!best) return q;
+    const diff = q.asOf.getTime() - best.asOf.getTime();
+    if (diff > 0 || (diff === 0 && q.recordedAt > best.recordedAt)) return q;
+    return best;
+  }, null);
+}
+
+function toPositionView(fund: FundWithPosition, opts: QuoteViewOptions = {}): FundPositionView {
+  const quote = pickCurrentQuote(fund.quotes, opts);
   return {
     fundId: fund.id,
     ticker: fund.ticker,
     name: fund.name,
     segment: fund.segment,
+    cnpj: fund.cnpj,
     notes: fund.notes,
     archivedAt: fund.archivedAt,
     quote,
@@ -163,7 +202,7 @@ export async function updateFundInfo(
       entityId: fundId,
       action: "update",
       data: {
-        before: { name: before.name, segment: before.segment, notes: before.notes },
+        before: { name: before.name, segment: before.segment, cnpj: before.cnpj, notes: before.notes },
         after: { ...data },
       },
     });
@@ -308,7 +347,7 @@ export async function insertInitialBalance(
 export async function getPortfolio(
   db: Database,
   userId: string,
-  options: { query?: string; includeArchived?: boolean } = {},
+  options: { query?: string; includeArchived?: boolean } & QuoteViewOptions = {},
 ): Promise<PortfolioView> {
   const query = options.query?.trim().toUpperCase();
   const funds = await db.fund.findMany({
@@ -320,7 +359,7 @@ export async function getPortfolio(
     include: fundWithPositionInclude,
     orderBy: { ticker: "asc" },
   });
-  const positions = funds.map(toPositionView);
+  const positions = funds.map((f) => toPositionView(f, options));
   return {
     positions,
     totals: computePortfolioTotals(
@@ -333,6 +372,7 @@ export async function getFundByTicker(
   db: Database,
   userId: string,
   rawTicker: string,
+  options: QuoteViewOptions = {},
 ): Promise<FundPositionView | null> {
   const parsed = tickerSchema.safeParse(rawTicker);
   if (!parsed.success) return null;
@@ -340,20 +380,22 @@ export async function getFundByTicker(
     where: { userId_ticker: { userId, ticker: parsed.data } },
     include: fundWithPositionInclude,
   });
-  return fund ? toPositionView(fund) : null;
+  return fund ? toPositionView(fund, options) : null;
 }
 
 export async function listQuotes(
   db: Database,
   userId: string,
   fundId: string,
+  options: QuoteViewOptions = {},
 ): Promise<QuoteView[]> {
   await findOwnedFund(db, userId, fundId);
   const quotes = await db.priceQuote.findMany({
     where: { fundId },
     orderBy: { recordedAt: "desc" },
+    take: 50,
   });
-  return quotes.map(toQuoteView);
+  return quotes.map((q) => toQuoteView(q, options));
 }
 
 /** Fundos ativos (para seletores de formulário/filtro). */

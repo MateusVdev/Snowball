@@ -21,6 +21,8 @@ export function AppHeader({ user }: { user: PublicUser }) {
             <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">Painel</Link>
             <Link href="/carteira" className="text-muted-foreground hover:text-foreground">Carteira</Link>
             <Link href="/operacoes" className="text-muted-foreground hover:text-foreground">Operações</Link>
+            <Link href="/proventos" className="text-muted-foreground hover:text-foreground">Proventos</Link>
+            <Link href="/integracoes" className="text-muted-foreground hover:text-foreground">Integrações</Link>
           </nav>
         </div>
         <div className="flex items-center gap-3">

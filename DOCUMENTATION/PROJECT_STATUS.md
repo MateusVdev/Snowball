@@ -8,8 +8,108 @@
 | Etapa | Descrição | Status |
 | ----- | --------- | ------ |
 | 1 | Fundação e arquitetura | ✅ Concluída (2026-11-20) |
-| 2 | Carteira, FIIs e operações financeiras | ✅ Concluída (2026-11-20) — aguardando validação do usuário |
-| 3+ | A definir nos próximos prompts | ⏳ Não iniciada |
+| 2 | Carteira, FIIs e operações financeiras | ✅ Concluída (2026-11-20) |
+| 3 | Integrações financeiras e dividendos | ✅ Concluída (2026-11-20) — aguardando validação do usuário |
+| 4+ | A definir nos próximos prompts | ⏳ Não iniciada |
+
+---
+
+## Etapa 3 — Integrações financeiras e dividendos
+
+### APIs avaliadas
+
+| Fonte | Resultado |
+| ----- | --------- |
+| brapi (documentação oficial + chamadas reais) | **Implementada**: cotação, fechamentos diários, proventos e dados cadastrais |
+| B3 FundosNET (documentos oficiais dos administradores) | **Implementada** como fonte oficial de proventos (exige CNPJ; site com proteção anti-robô) |
+| CVM — dados abertos (informe mensal de FII) | Avaliada; **não usada**: só tem percentuais mensais, sem valor por cota nem datas |
+
+Detalhes, limites e particularidades: [`INTEGRATIONS.md`](INTEGRATIONS.md).
+
+### Entregue
+
+- **Provedores independentes:**
+  - `PriceProvider`, `DividendProvider` e `AssetInformationProvider`;
+  - implementações brapi e B3 FundosNET;
+  - registro configurável por variáveis de ambiente;
+  - erros categorizados, timeout, controle de requisições (concorrência, intervalo, `Retry-After`) e cache com TTL.
+- **Cotações:**
+  - consulta por ticker, com cotação atual, fechamento anterior, variação do dia e horário de mercado;
+  - fallback identificado ("Fechamento · brapi") quando a cotação atual não é liberada pelo plano;
+  - fechamentos diários com gráfico;
+  - origem visível (Manual / Automática / Fechamento) e selo "Desatualizada";
+  - falhas nunca sobrescrevem nem zeram dados.
+- **Atualizações:**
+  - botões manuais;
+  - automática configurável por usuário, em segundo plano (`after()`);
+  - endpoint agendado `/api/cron/refresh` com `CRON_SECRET`;
+  - registro de cada execução e tela "Integrações" com última tentativa, último sucesso e detalhes.
+- **Proventos:**
+  - eventos oficiais (anunciado/pago) e previsões, com recebimentos "recebido e registrado";
+  - cadastro manual e importação automática (brapi + B3);
+  - prevenção de duplicidade (índices únicos, divergências reportadas, nada sobrescrito);
+  - anulação com motivo;
+  - triggers impedem exclusão e alteração.
+- **Quantidade elegível:** pelo histórico na data-com. O saldo inicial só vale a partir do dia em que foi registrado; antes disso, a elegibilidade é desconhecida e o usuário informa a quantidade.
+- **Cálculos:**
+  - valor do provento;
+  - total recebido, últimos 12 meses e renda passiva mensal (12m ÷ 12);
+  - média mensal desde o início;
+  - histórico mensal (gráfico + tabela) e anual;
+  - por fundo;
+  - DY 12m e yield on cost, com regra de dados suficientes.
+- **Próximos pagamentos:** só anúncios oficiais; previsões em coluna separada; "Aguardando divulgação." quando não há anúncio.
+- **Dados cadastrais:** consulta à brapi apresentada como sugestão; o usuário aplica campo a campo (nome, segmento, CNPJ).
+- **Diagnóstico:** `npm run integrations:check` (chamadas reais, sem gravar).
+
+### Mudanças no banco (4 migrações)
+
+| Migração | Conteúdo |
+| -------- | -------- |
+| `…_integrations_dividends` | `funds.cnpj`; novos campos em `price_quotes` (horário de mercado, fechamento anterior, variação); tabelas `daily_prices`, `dividend_events`, `dividend_receipts`, `sync_runs`, `user_settings`; enums de origem/natureza/tipo |
+| `…_dividends_integrity` | CHECKs; índice único da leitura automática de cotação; índice único parcial de proventos ativos; um recebimento ativo por evento; triggers de não exclusão e imutabilidade |
+| `…_dividend_rate_precision` / `…_receipt_rate_precision` | valor por cota com 10 casas (documentos oficiais usam 9) |
+
+### Testes executados (2026-11-20)
+
+| Verificação | Resultado |
+| ----------- | --------- |
+| TypeScript, ESLint, build | ✅ |
+| Unitários | ✅ 117/117 (42 novos: proventos, atualidade de cotação, provedores com respostas simuladas, cache, limitador) |
+| Integração (PostgreSQL) | ✅ 45/45 (17 novos: cotações, falhas, cache, desatualização, importação, duplicidade, elegibilidade, recebimentos, persistência, atualização automática) |
+| E2E | ✅ 19/19 (4 novos: proventos pela interface; integrações desligadas no E2E) |
+| Integração real (brapi e B3) | ✅ MXRF11/HGLG11: cotação (fechamento), cadastro, 13 proventos de cada, avisos oficiais da B3 conferindo com a brapi; KNRI11 → 401 sem chave (esperado) |
+| `npm audit` | ✅ 0 vulnerabilidades |
+
+Respostas simuladas existem **somente** nos testes (`tests/unit/providers.test.ts` e os provedores falsos de `tests/integration/market-dividends.test.ts`).
+
+### Problemas encontrados e soluções
+
+| Problema | Solução |
+| -------- | ------- |
+| Sem chave, a brapi não libera a cotação atual de FIIs (401) | Fallback para o último fechamento diário, identificado como tal; com `BRAPI_API_KEY` usa a cotação atual |
+| Endpoints de FII da brapi são do plano Pro (sem chave, só MXRF11/HGLG11) | Documentado; FundosNET cobre proventos oficiais de qualquer fundo com CNPJ |
+| B3 FundosNET bloqueia rajadas (Cloudflare: 403/HTML) | 1 requisição a cada 5 s, poucos documentos, sem baixar de novo documentos já importados; bloqueio tratado como indisponibilidade |
+| Amortização com 9 casas decimais | Valor por cota ampliado para 10 casas |
+| `relatedTo` sem ano ("OUTUBRO") | Competência fica vazia; o texto original é exibido |
+| Dados cadastrais divergentes na fonte (MXRF11 "Logística" × "papel") | Nada é gravado automaticamente; sugestões com aplicação campo a campo |
+| `fetch` do Node não usa proxy HTTP do ambiente de desenvolvimento | `NODE_USE_ENV_PROXY=1` apenas neste ambiente (documentado) |
+
+### Pendências e limitações conhecidas
+
+- Sem `BRAPI_API_KEY`:
+  - só há dados automáticos para MXRF11 e HGLG11;
+  - a cotação é o último fechamento diário, que pode vir 1 pregão atrasado e aparece como "Desatualizada".
+- Fundos fora do sandbox exigem chave da brapi (proventos/histórico/cadastro de FII são do plano Pro) ou CNPJ cadastrado para os avisos da B3.
+- A atualização automática roda quando alguém abre o sistema. Para horários fixos, configure `CRON_SECRET` e um agendador externo.
+- Feriados não entram no cálculo de "desatualizada".
+- Amortizações não ajustam o custo médio (etapa de eventos corporativos).
+- Na carteira real registrada na Etapa 2, os proventos com data-com **anteriores** ao registro do saldo inicial aparecem com elegibilidade desconhecida. Confirme-os informando a quantidade que você tinha (o sistema não supõe).
+- No banco de desenvolvimento deste ambiente, o usuário `verificacao@local.dev` recebeu proventos e cotações reais importados durante a verificação.
+
+### Próxima etapa (não iniciada)
+
+Aguardando validação desta etapa.
 
 ---
 

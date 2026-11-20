@@ -5,6 +5,10 @@ import { ServiceError, toServiceError } from "@/server/services/errors";
 /** Estado devolvido pelas Server Actions de formulário. */
 export interface FormState {
   error?: string;
+  /** Mensagem de sucesso (ações que não redirecionam). */
+  success?: string;
+  /** Detalhes por item (ex.: resultado da atualização de cada fundo). */
+  details?: string[];
   fieldErrors?: Record<string, string[] | undefined>;
   /** Valores enviados, para reexibir após erro. */
   values?: Record<string, string>;

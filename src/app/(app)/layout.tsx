@@ -1,5 +1,9 @@
+import { after } from "next/server";
 import { AppHeader } from "@/components/layout/app-header";
 import { requireUser } from "@/server/auth/dal";
+import { getDb } from "@/server/db/client";
+import { getIntegrations } from "@/server/integrations/registry";
+import { maybeAutoRefresh } from "@/server/services/market/auto-refresh";
 
 /**
  * Layout da área privada. A verificação real da sessão (no banco) acontece
@@ -13,6 +17,9 @@ export default async function PrivateLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
+  // Atualização automática em segundo plano (após enviar a resposta), se o
+  // intervalo configurado venceu. Nunca bloqueia nem quebra a página.
+  after(() => maybeAutoRefresh(getDb(), user.id, getIntegrations()));
 
   return (
     <div className="flex flex-1 flex-col">

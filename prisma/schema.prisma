@@ -27,10 +27,13 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions    Session[]
-  funds       Fund[]
-  operations  Operation[]
-  auditEvents AuditEvent[]
+  sessions         Session[]
+  funds            Fund[]
+  operations       Operation[]
+  auditEvents      AuditEvent[]
+  dividendEvents   DividendEvent[]
+  dividendReceipts DividendReceipt[]
+  settings         UserSettings?
 
   @@map("users")
 }
@@ -81,15 +84,20 @@ model Fund {
   /// Opcional: não é preenchido automaticamente para não inventar informação.
   name       String?
   segment    String?
+  /// CNPJ (somente dígitos). Necessário para consultar documentos oficiais (B3 FundosNET).
+  cnpj       String?
   notes      String?
   archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  operations Operation[]
-  quotes     PriceQuote[]
-  position   Position?
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operations       Operation[]
+  quotes           PriceQuote[]
+  position         Position?
+  dailyPrices      DailyPrice[]
+  dividendEvents   DividendEvent[]
+  dividendReceipts DividendReceipt[]
 
   @@unique([userId, ticker])
   @@map("funds")
@@ -145,10 +153,10 @@ model Operation {
   realizedResult    Decimal? @map("realized_result") @db.Decimal(18, 2)
 
   // ---- Rastreabilidade ----
-  correctsId   String?   @unique @map("corrects_id")
-  voidedAt     DateTime? @map("voided_at") @db.Timestamptz(3)
-  voidReason   String?   @map("void_reason")
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  correctsId String?   @unique @map("corrects_id")
+  voidedAt   DateTime? @map("voided_at") @db.Timestamptz(3)
+  voidReason String?   @map("void_reason")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   fund        Fund       @relation(fields: [fundId], references: [id], onDelete: Restrict)
@@ -179,6 +187,10 @@ model Position {
 enum QuoteSource {
   /// Valor digitado pelo usuário como referência (não é cotação de mercado em tempo real).
   MANUAL
+  /// Obtida automaticamente da brapi (cotação atual do endpoint de cotação).
+  BRAPI
+  /// Fechamento diário obtido do histórico da brapi (usado quando a cotação atual não está disponível no plano).
+  BRAPI_DAILY_CLOSE
 
   @@map("quote_source")
 }
@@ -192,6 +204,14 @@ model PriceQuote {
   /// Data a que o preço se refere, quando conhecida (nula se não informada).
   referenceDate DateTime?   @map("reference_date") @db.Date
   note          String?
+  /// Momento a que a cotação automática se refere, segundo o provedor.
+  marketTime    DateTime?   @map("market_time") @db.Timestamptz(3)
+  /// Fechamento anterior e variação do dia, quando o provedor informa.
+  previousClose Decimal?    @map("previous_close") @db.Decimal(18, 8)
+  change        Decimal?    @db.Decimal(18, 8)
+  /// Variação percentual em pontos percentuais (-1.16 = -1,16%), como o provedor informa.
+  changePercent Decimal?    @map("change_percent") @db.Decimal(12, 6)
+  /// Momento em que o sistema registrou a cotação (consulta ao provedor ou digitação).
   recordedAt    DateTime    @default(now()) @map("recorded_at") @db.Timestamptz(3)
 
   fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
@@ -215,4 +235,178 @@ model AuditEvent {
   @@index([entityType, entityId])
   @@index([userId, createdAt])
   @@map("audit_events")
+}
+
+// ============================================================
+// Integrações e proventos (Etapa 3)
+// ============================================================
+
+/// Série diária de preços (histórico) obtida de provedores. Uma linha por fundo, data e fonte.
+model DailyPrice {
+  id            String      @id @default(cuid())
+  fundId        String      @map("fund_id")
+  date          DateTime    @db.Date
+  open          Decimal?    @db.Decimal(18, 8)
+  high          Decimal?    @db.Decimal(18, 8)
+  low           Decimal?    @db.Decimal(18, 8)
+  close         Decimal     @db.Decimal(18, 8)
+  adjustedClose Decimal?    @map("adjusted_close") @db.Decimal(18, 8)
+  volume        Decimal?    @db.Decimal(24, 0)
+  source        QuoteSource
+  fetchedAt     DateTime    @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@unique([fundId, date, source])
+  @@map("daily_prices")
+}
+
+enum DividendKind {
+  /// Anunciado oficialmente (por documento do fundo ou fonte que o reproduz).
+  OFFICIAL
+  /// Previsão/estimativa informada pelo usuário. NUNCA é tratada como anúncio.
+  FORECAST
+
+  @@map("dividend_kind")
+}
+
+enum DividendType {
+  /// Rendimento (renda).
+  INCOME
+  /// Amortização (devolução de capital). Não entra em renda nem em dividend yield.
+  AMORTIZATION
+
+  @@map("dividend_type")
+}
+
+enum DataSource {
+  MANUAL
+  BRAPI
+  B3_FUNDOSNET
+
+  @@map("data_source")
+}
+
+/// Provento de um fundo (evento): valor por cota, data-com e pagamento.
+/// O status (anunciado / pago / previsto) é derivado de kind + datas.
+model DividendEvent {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  fundId         String       @map("fund_id")
+  kind           DividendKind
+  type           DividendType
+  source         DataSource
+  /// Valor por cota pago na data (sem ajuste por desdobramento).
+  ratePerShare   Decimal      @map("rate_per_share") @db.Decimal(20, 10)
+  /// Data-com (data-base): quem tem a cota ao final deste dia tem direito.
+  dataCom        DateTime     @map("data_com") @db.Date
+  paymentDate    DateTime?    @map("payment_date") @db.Date
+  approvedOn     DateTime?    @map("approved_on") @db.Date
+  /// Competência normalizada "AAAA-MM", quando é possível obtê-la da fonte sem suposição.
+  competence     String?
+  /// Texto de referência como veio da fonte (ex.: "Outubro-2026").
+  referenceLabel String?      @map("reference_label")
+  /// Conferido em documento publicado (quando a fonte informa).
+  verified       Boolean?
+  /// Identificador na fonte (ex.: id do documento no FundosNET).
+  externalId     String?      @map("external_id")
+  notes          String?
+  voidedAt       DateTime?    @map("voided_at") @db.Timestamptz(3)
+  voidReason     String?      @map("void_reason")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund     Fund              @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  receipts DividendReceipt[]
+
+  @@index([userId, paymentDate])
+  @@index([fundId, dataCom])
+  @@map("dividend_events")
+}
+
+enum EligibilitySource {
+  /// Calculada pelo histórico de operações na data-com.
+  LEDGER
+  /// Informada/confirmada pelo usuário.
+  MANUAL
+
+  @@map("eligibility_source")
+}
+
+/// Provento efetivamente recebido e registrado pelo usuário.
+model DividendReceipt {
+  id               String            @id @default(cuid())
+  userId           String            @map("user_id")
+  fundId           String            @map("fund_id")
+  eventId          String            @map("event_id")
+  eligibleQuantity Decimal           @map("eligible_quantity") @db.Decimal(18, 8)
+  quantitySource   EligibilitySource @map("quantity_source")
+  ratePerShare     Decimal           @map("rate_per_share") @db.Decimal(20, 10)
+  /// round2(quantidade elegível × valor por cota)
+  totalAmount      Decimal           @map("total_amount") @db.Decimal(18, 2)
+  paymentDate      DateTime          @map("payment_date") @db.Date
+  notes            String?
+  voidedAt         DateTime?         @map("voided_at") @db.Timestamptz(3)
+  voidReason       String?           @map("void_reason")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund  Fund          @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  event DividendEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([userId, paymentDate])
+  @@map("dividend_receipts")
+}
+
+enum SyncKind {
+  QUOTES
+  DIVIDENDS
+  ASSET_INFO
+  PRICE_HISTORY
+
+  @@map("sync_kind")
+}
+
+enum SyncStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+  SKIPPED
+
+  @@map("sync_status")
+}
+
+/// Registro de cada atualização automática/manual (última atualização, falhas).
+model SyncRun {
+  id          String     @id @default(cuid())
+  userId      String     @map("user_id")
+  kind        SyncKind
+  provider    String
+  trigger     String
+  status      SyncStatus
+  message     String?
+  itemsOk     Int        @default(0) @map("items_ok")
+  itemsFailed Int        @default(0) @map("items_failed")
+  details     Json?
+  startedAt   DateTime   @map("started_at") @db.Timestamptz(3)
+  finishedAt  DateTime   @map("finished_at") @db.Timestamptz(3)
+
+  @@index([userId, kind, startedAt])
+  @@map("sync_runs")
+}
+
+/// Preferências do usuário para atualizações automáticas.
+model UserSettings {
+  userId               String   @id @map("user_id")
+  autoUpdateEnabled    Boolean  @default(true) @map("auto_update_enabled")
+  /// Intervalo mínimo entre atualizações automáticas de cotações.
+  quoteRefreshMinutes  Int      @default(30) @map("quote_refresh_minutes")
+  /// Intervalo mínimo entre importações automáticas de proventos.
+  dividendRefreshHours Int      @default(12) @map("dividend_refresh_hours")
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
 }

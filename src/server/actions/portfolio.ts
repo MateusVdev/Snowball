@@ -117,6 +117,7 @@ export async function updateFundAction(
     const fund = await updateFundInfo(getDb(), user.id, fundId, {
       name: str(formData, "name"),
       segment: str(formData, "segment"),
+      cnpj: str(formData, "cnpj"),
       notes: str(formData, "notes"),
     });
     ticker = fund.ticker;

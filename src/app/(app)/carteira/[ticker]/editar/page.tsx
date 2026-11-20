@@ -42,6 +42,7 @@ export default async function EditFundPage({ params }: PageProps<"/carteira/[tic
           <ActionForm action={updateFundAction.bind(null, fund.fundId)} submitLabel="Salvar alterações" testId="edit-fund-form">
             <Field name="name" label="Nome" defaultValue={fund.name ?? ""} />
             <Field name="segment" label="Segmento" defaultValue={fund.segment ?? ""} list="segment-options" />
+            <Field name="cnpj" label="CNPJ" defaultValue={fund.cnpj ?? ""} hint="Necessário para buscar avisos oficiais na B3 FundosNET" inputMode="numeric" />
             <Field name="notes" label="Observações" as="textarea" defaultValue={fund.notes ?? ""} />
           </ActionForm>
           <datalist id="segment-options">

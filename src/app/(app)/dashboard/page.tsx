@@ -42,7 +42,7 @@ export default async function DashboardPage() {
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Resumo">
         <Stat label="Capital investido"><Money value={totals.investedCapital} /></Stat>
-        <Stat label="Valor atual" hint="Cotações manuais de referência"><Money value={totals.currentValue} /></Stat>
+        <Stat label="Valor atual" hint="Cotação atual de cada fundo (manual ou automática)"><Money value={totals.currentValue} /></Stat>
         <Stat label="Resultado não realizado" hint={<Percent value={totals.unrealizedReturn} />}>
           <Money value={totals.unrealizedResult} signed />
         </Stat>

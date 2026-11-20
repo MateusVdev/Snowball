@@ -6,6 +6,9 @@ import { loadTestEnv } from "./tests/support/load-test-env";
  * Pré-requisito: `npm run build`.
  */
 const databaseUrl = loadTestEnv();
+// E2E não consulta APIs externas: as integrações são testadas com respostas
+// simuladas nos testes unitários/integração; aqui ficam desligadas.
+process.env.INTEGRATIONS_ENABLED = "false";
 const PORT = 3100;
 
 export default defineConfig({
@@ -26,6 +29,6 @@ export default defineConfig({
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { DATABASE_URL: databaseUrl, NODE_ENV: "production" },
+    env: { DATABASE_URL: databaseUrl, NODE_ENV: "production", INTEGRATIONS_ENABLED: "false" },
   },
 });

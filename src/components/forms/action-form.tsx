@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useActionState, useContext, type ReactNode } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,19 @@ export function ActionForm({
   return (
     <FormContext value={{ state, pending }}>
       <form action={formAction} className={cn("grid gap-4", className)} noValidate data-testid={testId}>
+        {state.success ? (
+          <Alert data-testid="form-success">
+            <CheckCircle2 aria-hidden />
+            <AlertDescription>
+              <p>{state.success}</p>
+              {state.details?.length ? (
+                <ul className="list-disc pl-4 text-xs">
+                  {state.details.map((d, i) => <li key={i}>{d}</li>)}
+                </ul>
+              ) : null}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {state.error ? (
           <Alert variant="destructive" data-testid="form-error">
             <AlertCircle aria-hidden />

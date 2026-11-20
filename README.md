@@ -4,10 +4,9 @@ Plataforma privada de gerenciamento de investimentos em Fundos Imobiliários
 (FIIs): acompanhamento de carteira, monitoramento de proventos e simulador de
 reinvestimento de dividendos (efeito "bola de neve").
 
-> **Status:** Etapa 2 concluída — carteira de FIIs, operações (compra,
-> venda, saldo inicial), preço médio, resultados realizado/não realizado,
-> histórico auditável. Proventos, cotações automáticas e simulador chegam nas
-> próximas etapas. Detalhes em [`DOCUMENTATION/PROJECT_STATUS.md`](DOCUMENTATION/PROJECT_STATUS.md).
+> **Status:** Etapa 3 concluída — carteira e operações (Etapa 2), cotações
+> automáticas (brapi), proventos (brapi + avisos oficiais da B3 FundosNET),
+> histórico de renda e dividend yield. Simulador e dashboard nas próximas etapas. Detalhes em [`DOCUMENTATION/PROJECT_STATUS.md`](DOCUMENTATION/PROJECT_STATUS.md).
 
 ## Stack
 
@@ -88,11 +87,13 @@ Acesse <http://localhost:3000> e entre com o usuário criado.
 | `npm run db:studio`        | Prisma Studio                                           |
 | `npm run user:create`      | Cria usuário ou redefine senha (`--reset-password`)     |
 | `npm run portfolio:seed`   | Cadastra a carteira inicial informada (`--email`)       |
+| `npm run integrations:check` | Diagnóstico real das APIs (não grava nada)            |
 
 ## Documentação
 
 - [Arquitetura](DOCUMENTATION/ARCHITECTURE.md)
 - [Regras financeiras](DOCUMENTATION/FINANCIAL_RULES.md)
+- [Integrações externas](DOCUMENTATION/INTEGRATIONS.md)
 - [Status do projeto](DOCUMENTATION/PROJECT_STATUS.md)
 
 ## Segurança

@@ -120,9 +120,24 @@ const optionalDateSchema = z
     return date;
   });
 
+/** CNPJ: aceita com ou sem máscara; guarda só os 14 dígitos. */
+export const cnpjSchema = z
+  .string()
+  .optional()
+  .transform((raw, ctx) => {
+    const digits = (raw ?? "").replace(/\D/g, "");
+    if (digits === "") return null;
+    if (digits.length !== 14) {
+      ctx.addIssue({ code: "custom", message: "CNPJ deve ter 14 dígitos." });
+      return z.NEVER;
+    }
+    return digits;
+  });
+
 export const fundInfoSchema = z.object({
   name: optionalText(120),
   segment: optionalText(60),
+  cnpj: cnpjSchema,
   notes: optionalText(500),
 });
 

@@ -1,3 +1,4 @@
+import { toDecimal } from "@/domain/money";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Plus, Search } from "lucide-react";
@@ -23,6 +24,9 @@ import {
 import { requireUser } from "@/server/auth/dal";
 import { getDb } from "@/server/db/client";
 import { getPortfolio } from "@/server/services/portfolio/fund-service";
+import { getIntegrations } from "@/server/integrations/registry";
+import { ActionForm } from "@/components/forms/action-form";
+import { refreshQuotesAction } from "@/server/actions/market";
 
 export const metadata: Metadata = { title: "Carteira" };
 
@@ -31,9 +35,11 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/cartei
   const params = await searchParams;
   const q = typeof params.q === "string" ? params.q.slice(0, 12) : "";
   const showArchived = params.arquivados === "1";
+  const integrations = getIntegrations();
   const { positions, totals } = await getPortfolio(getDb(), user.id, {
     query: q,
     includeArchived: showArchived,
+    staleAfterBusinessHours: integrations.staleAfterBusinessHours,
   });
 
   return (
@@ -64,7 +70,7 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/cartei
           hint={
             totals.positionsWithoutQuote > 0
               ? `${totals.positionsWithoutQuote} posição(ões) sem cotação não incluída(s)`
-              : "Com base nas cotações manuais registradas"
+              : "Pela cotação atual de cada fundo (manual ou automática)"
           }
         >
           <Money value={totals.currentValue} />
@@ -76,6 +82,14 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/cartei
           <Money value={totals.realizedResult} signed />
         </Stat>
       </section>
+
+      {integrations.enabled ? (
+        <ActionForm action={refreshQuotesAction} submitLabel="Atualizar cotações agora" submitVariant="outline" testId="refresh-quotes-form" className="max-w-3xl">
+          <p className="text-sm text-muted-foreground">
+            Consulta a brapi para todos os fundos ativos. Em caso de falha, a última cotação válida é mantida.
+          </p>
+        </ActionForm>
+      ) : null}
 
       <form className="flex flex-wrap items-center gap-3" role="search" action="/carteira">
         <div className="relative w-full max-w-xs">
@@ -112,6 +126,7 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/cartei
                 <TableHead className="text-right">Preço médio</TableHead>
                 <TableHead className="text-right">Investido</TableHead>
                 <TableHead className="text-right">Cotação</TableHead>
+                <TableHead className="text-right">Dia</TableHead>
                 <TableHead className="text-right">Valor atual</TableHead>
                 <TableHead className="text-right">Resultado</TableHead>
                 <TableHead className="text-right">Rentab.</TableHead>
@@ -141,9 +156,12 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/cartei
                     <div className="flex items-center justify-end gap-2">
                       <UnitPrice value={p.metrics.currentPrice} />
                       {p.quote ? (
-                        <QuoteSourceBadge recordedAt={p.quote.recordedAt} referenceDate={p.quote.referenceDate} />
+                        <QuoteSourceBadge quote={p.quote} />
                       ) : null}
                     </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {p.quote?.changePercent ? <Percent value={toDecimal(p.quote.changePercent).dividedBy(100)} /> : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-right"><Money value={p.metrics.currentValue} /></TableCell>
                   <TableCell className="text-right"><Money value={p.metrics.unrealizedResult} signed /></TableCell>
@@ -155,8 +173,10 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/cartei
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        Resultado e rentabilidade referem-se às cotas em carteira (não realizado). Cotações marcadas como
-        “Manual” são valores de referência digitados, não cotações de mercado em tempo real.
+        Resultado e rentabilidade referem-se às cotas em carteira (não realizado). “Manual” = valor de referência
+        digitado; “Automática” = cotação da brapi; “Fechamento” = último fechamento diário da brapi (usado quando a
+        cotação atual não é liberada pelo plano). “Desatualizada” = mais de {integrations.staleAfterBusinessHours} h
+        úteis. “Dia” = variação informada pela fonte.
       </p>
     </div>
   );
