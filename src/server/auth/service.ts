@@ -67,6 +67,71 @@ export async function changePassword(
   ]);
 }
 
+/**
+ * Reserva uma tentativa de autenticação para o e-mail/IP, respeitando o limite.
+ *
+ * Causa raiz corrigida (auditoria de segurança): antes, a contagem de falhas
+ * era lida ANTES de registrar a tentativa; requisições simultâneas liam a
+ * mesma contagem e TODAS passavam (30 senhas testadas em paralelo com limite
+ * de 5). Agora, numa transação:
+ * 1. advisory locks do PostgreSQL serializam as tentativas do mesmo e-mail e
+ *    do mesmo IP (sempre nessa ordem — sem risco de deadlock);
+ * 2. a contagem inclui as tentativas em andamento;
+ * 3. a tentativa é gravada como FALHA antes de conferir a senha; só vira
+ *    sucesso depois da conferência (ver `finishAttempt`).
+ */
+async function reserveAttempt(
+  db: Database,
+  email: string,
+  ipAddress: string | null,
+  now: Date,
+): Promise<{ limited: true } | { limited: false; attemptId: string }> {
+  const windowStart = rateLimitWindowStart(now);
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`login:email:${email}`}, 0))`;
+    if (ipAddress) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`login:ip:${ipAddress}`}, 0))`;
+    }
+    const failed = { success: false, createdAt: { gte: windowStart } } as const;
+    const byEmail = await tx.loginAttempt.count({ where: { email, ...failed } });
+    const byIp = ipAddress ? await tx.loginAttempt.count({ where: { ipAddress, ...failed } }) : 0;
+    const byEmailAndIp = ipAddress
+      ? await tx.loginAttempt.count({ where: { email, ipAddress, ...failed } })
+      : byEmail;
+    if (isLoginRateLimited({ byEmail, byIp, byEmailAndIp })) return { limited: true };
+    const attempt = await tx.loginAttempt.create({
+      data: { email, ipAddress, success: false, createdAt: now },
+    });
+    return { limited: false, attemptId: attempt.id };
+  });
+}
+
+async function finishAttempt(db: Database, attemptId: string, success: boolean) {
+  if (success) await db.loginAttempt.update({ where: { id: attemptId }, data: { success: true } });
+}
+
+export type PasswordCheckResult = "ok" | "invalid" | "rate_limited";
+
+/**
+ * Confere a senha de um usuário JÁ AUTENTICADO (ex.: "senha atual" na troca de
+ * senha) com o mesmo limite de tentativas do login — sem isso, quem obtivesse
+ * um cookie de sessão poderia descobrir a senha por tentativa e erro.
+ */
+export async function checkPasswordWithLimit(
+  db: Database,
+  userId: string,
+  password: string,
+  options: { meta?: RequestMeta; now?: Date } = {},
+): Promise<PasswordCheckResult> {
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (!user) return "invalid";
+  const slot = await reserveAttempt(db, user.email, options.meta?.ipAddress ?? null, options.now ?? new Date());
+  if (slot.limited) return "rate_limited";
+  const ok = await verifyPassword(password, user.passwordHash);
+  await finishAttempt(db, slot.attemptId, ok);
+  return ok ? "ok" : "invalid";
+}
+
 export async function login(
   db: Database,
   credentials: { email: string; password: string },
@@ -75,20 +140,9 @@ export async function login(
   const now = options.now ?? new Date();
   const email = credentials.email.trim().toLowerCase();
   const ipAddress = options.meta?.ipAddress ?? null;
-  const windowStart = rateLimitWindowStart(now);
 
-  const [byEmail, byIp] = await Promise.all([
-    db.loginAttempt.count({
-      where: { email, success: false, createdAt: { gte: windowStart } },
-    }),
-    ipAddress
-      ? db.loginAttempt.count({
-          where: { ipAddress, success: false, createdAt: { gte: windowStart } },
-        })
-      : Promise.resolve(0),
-  ]);
-
-  if (isLoginRateLimited({ byEmail, byIp })) {
+  const slot = await reserveAttempt(db, email, ipAddress, now);
+  if (slot.limited) {
     return { ok: false, reason: "rate_limited" };
   }
 
@@ -99,10 +153,7 @@ export async function login(
     user?.passwordHash ?? (await getDummyPasswordHash()),
   );
   const success = Boolean(user) && passwordMatches;
-
-  await db.loginAttempt.create({
-    data: { email, ipAddress, success, createdAt: now },
-  });
+  await finishAttempt(db, slot.attemptId, success);
 
   if (!user || !success) {
     return { ok: false, reason: "invalid_credentials" };
@@ -181,7 +232,11 @@ export async function purgeExpiredAuthData(
   return { sessions: sessions.count, attempts: attempts.count };
 }
 
-/** Confere a senha atual de um usuário (mesmo custo quando não existe). */
+/**
+ * Confere a senha atual de um usuário (mesmo custo quando não existe).
+ * SEM limite de tentativas: em fluxos acionados pelo usuário use
+ * `checkPasswordWithLimit`.
+ */
 export async function verifyUserPassword(db: Database, userId: string, password: string) {
   const user = await db.user.findUnique({ where: { id: userId } });
   const ok = await verifyPassword(password, user?.passwordHash ?? (await getDummyPasswordHash()));

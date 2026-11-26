@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireUser } from "@/server/auth/dal";
-import { changePassword, revokeOtherSessions, verifyUserPassword } from "@/server/auth/service";
-import { clearSessionCookie, readSessionToken } from "@/server/auth/session";
+import { changePassword, checkPasswordWithLimit, revokeOtherSessions } from "@/server/auth/service";
+import { clearSessionCookie, getRequestMeta, readSessionToken } from "@/server/auth/session";
 import { getDb } from "@/server/db/client";
 import { recordAudit } from "@/server/services/audit";
 import { restoreBackup } from "@/server/export/backup";
@@ -50,7 +50,12 @@ export async function changePasswordAction(_: FormState, formData: FormData): Pr
       confirmPassword: formData.get("confirmPassword"),
     });
     const db = getDb();
-    if (!(await verifyUserPassword(db, user.id, data.currentPassword))) {
+    // Mesmo limite de tentativas do login (impede descobrir a senha com uma sessão roubada).
+    const check = await checkPasswordWithLimit(db, user.id, data.currentPassword, { meta: await getRequestMeta() });
+    if (check === "rate_limited") {
+      return { error: "Muitas tentativas. Aguarde alguns minutos e tente novamente.", ts: Date.now() };
+    }
+    if (check === "invalid") {
       return { error: "Senha atual incorreta.", fieldErrors: { currentPassword: ["Senha atual incorreta."] }, ts: Date.now() };
     }
     await changePassword(db, user.id, data.newPassword);

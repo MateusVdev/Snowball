@@ -8,7 +8,8 @@ import type { IndexRateProvider } from "@/server/integrations/types";
  * Cache local das taxas diárias do CDI/Selic (tabela index_daily_rates).
  *
  * - Incremental: só busca o que falta antes da menor e depois da maior data já
- *   guardada, no máximo uma vez por hora (salvo `force`). Nada é apagado; taxas já gravadas não são sobrescritas.
+ *   guardada, no máximo uma vez por hora (com `force`, no máximo uma tentativa a
+ *   cada 2 minutos). Nada é apagado; taxas já gravadas não são sobrescritas.
  * - Se a API falhar, o cache continua valendo (o cálculo usa a última taxa
  *   conhecida como projeção) e o erro fica registrado em index_sync_status.
  * - Sem provedor (INTEGRATIONS_ENABLED=false) nada é buscado.
@@ -26,6 +27,12 @@ export interface IndexSyncResult {
 
 /** Intervalo mínimo entre buscas de datas recentes (evita chamadas repetidas). */
 export const INDEX_SYNC_MIN_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * Mesmo com `force` (botão "Atualizar"), no mínimo este intervalo entre
+ * tentativas: cliques repetidos não podem martelar a API do Banco Central
+ * (o servidor inteiro poderia ser bloqueado por excesso de requisições).
+ */
+export const INDEX_SYNC_FORCED_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
 async function cachedRange(db: Database, indexer: RateIndexer) {
   const agg = await db.indexDailyRate.aggregate({
@@ -57,10 +64,9 @@ export async function syncIndexRates(
     if (opts.from <= to) windows.push([opts.from, to]);
   } else {
     const status = await db.indexSyncStatus.findUnique({ where: { indexer } });
+    const minInterval = opts.force ? INDEX_SYNC_FORCED_MIN_INTERVAL_MS : INDEX_SYNC_MIN_INTERVAL_MS;
     const recentlyTried =
-      !opts.force &&
-      status?.lastAttemptAt != null &&
-      now.getTime() - status.lastAttemptAt.getTime() < INDEX_SYNC_MIN_INTERVAL_MS;
+      status?.lastAttemptAt != null && now.getTime() - status.lastAttemptAt.getTime() < minInterval;
     if (!recentlyTried) {
       // Só busca antes da menor data se houver dia útil no intervalo.
       if (opts.from < range.min && businessDaysBetween(opts.from, range.min).length > 0) {

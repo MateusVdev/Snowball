@@ -6,6 +6,7 @@ import { rebuildFundLedger } from "@/server/services/portfolio/ledger-sync";
 import { ServiceError } from "@/server/services/errors";
 import { parseSimulationConfig } from "@/validation/simulation";
 import type { FixedIncomeSimulationFormInput } from "@/validation/fixed-income-simulation";
+import { fixedIncomeAssetSchema, fixedIncomeMovementSchema } from "@/validation/fixed-income";
 import { runFixedIncomeSimulation, simulationSummaryJson } from "@/server/services/fixed-income/simulation-service";
 
 /**
@@ -145,6 +146,25 @@ export async function restoreBackup(db: Database, userId: string, raw: unknown) 
   }
   // Configurações de simulação são revalidadas antes de gravar.
   for (const sim of backup.data.simulations) parseSimulationConfig(sim.config);
+  // Títulos e movimentos de renda fixa passam pelas MESMAS regras do cadastro
+  // (ex.: só indexadores suportados): um arquivo adulterado não pode gravar
+  // dados que o app não consegue processar (o que derrubaria as telas).
+  const fiAssetData = new Map(
+    backup.data.fixedIncomeAssets.map((f) => {
+      const parsed = fixedIncomeAssetSchema.safeParse({
+        name: f.name, issuer: f.issuer, productType: f.productType, indexer: f.indexer, rate: f.rate,
+        spreadAnnualPercent: f.spreadAnnualPercent, taxExempt: f.taxExempt, dailyLiquidity: f.dailyLiquidity,
+        maturityDate: f.maturityDate ? f.maturityDate.slice(0, 10) : null, notes: f.notes,
+      });
+      if (!parsed.success) throw new ServiceError("INVALID", `Título de renda fixa inválido no backup: ${f.name.slice(0, 80)}.`);
+      return [f.id, parsed.data] as const;
+    }),
+  );
+  for (const m of backup.data.fixedIncomeMovements) {
+    if (!fixedIncomeMovementSchema.shape.amount.safeParse(m.amount).success) {
+      throw new ServiceError("INVALID", "Movimento de renda fixa com valor inválido no backup.");
+    }
+  }
   const fiSimResults = backup.data.fixedIncomeSimulations.map((sim) => {
     try {
       return { sim, ...runFixedIncomeSimulation(sim.config as FixedIncomeSimulationFormInput) };
@@ -216,11 +236,7 @@ export async function restoreBackup(db: Database, userId: string, raw: unknown) 
       }
       for (const f of B.fixedIncomeAssets) {
         const created = await tx.fixedIncomeAsset.create({
-          data: {
-            userId, name: f.name, issuer: f.issuer, productType: f.productType, indexer: f.indexer, rate: f.rate, spreadAnnualPercent: f.spreadAnnualPercent,
-            taxExempt: f.taxExempt, dailyLiquidity: f.dailyLiquidity, maturityDate: d(f.maturityDate), notes: f.notes, archivedAt: d(f.archivedAt),
-            createdAt: new Date(f.createdAt),
-          },
+          data: { userId, ...fiAssetData.get(f.id)!, archivedAt: d(f.archivedAt), createdAt: new Date(f.createdAt) },
         });
         ids.set(f.id, created.id);
       }

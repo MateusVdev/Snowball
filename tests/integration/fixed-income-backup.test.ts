@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createUser } from "@/server/auth/service";
 import { addDays, businessDaysBetween, fromIso } from "@/domain/fixed-income/calendar";
+import { todayIsoDate } from "@/domain/dates";
 import { exportBackup, restoreBackup } from "@/server/export/backup";
 import { buildDataset } from "@/server/export/datasets";
 import { createFund } from "@/server/services/portfolio/fund-service";
@@ -176,6 +177,10 @@ describe("exportação e isolamento por usuário", () => {
     expect(calls[0][1]).toBe("2026-09-21");
     expect(await ensureIndexRates(db, null, userId)).toEqual([]);
     const slow: IndexRateProvider = { ...provider, getDailyRates: () => new Promise(() => {}) };
+    // Garante que haja algo a buscar (independe de hoje ser dia útil ou feriado)
+    // e que a última tentativa foi há 10 min (o "forçar" respeita 2 min).
+    await db.indexDailyRate.deleteMany({ where: { date: { gte: fromIso(addDays(todayIsoDate(), -7)) } } });
+    await db.indexSyncStatus.updateMany({ data: { lastAttemptAt: new Date(Date.now() - 10 * 60_000) } });
     expect(await ensureIndexRates(db, slow, userId, { force: true, budgetMs: 50 })).toEqual([]); // não trava a tela
   });
 });
