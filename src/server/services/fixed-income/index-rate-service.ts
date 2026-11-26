@@ -8,8 +8,9 @@ import type { IndexRateProvider } from "@/server/integrations/types";
  * Cache local das taxas diárias do CDI/Selic (tabela index_daily_rates).
  *
  * - Incremental: só busca o que falta antes da menor e depois da maior data já
- *   guardada, no máximo uma vez por hora (com `force`, no máximo uma tentativa a
- *   cada 2 minutos). Nada é apagado; taxas já gravadas não são sobrescritas.
+ *   guardada. Datas recentes: no máximo uma vez por hora (com `force`, uma
+ *   tentativa a cada 2 minutos). Datas antigas que faltam: uma tentativa a cada
+ *   2 minutos. Nada é apagado; taxas já gravadas não são sobrescritas.
  * - Se a API falhar, o cache continua valendo (o cálculo usa a última taxa
  *   conhecida como projeção) e o erro fica registrado em index_sync_status.
  * - Sem provedor (INTEGRATIONS_ENABLED=false) nada é buscado.
@@ -33,6 +34,9 @@ export const INDEX_SYNC_MIN_INTERVAL_MS = 60 * 60 * 1000;
  * (o servidor inteiro poderia ser bloqueado por excesso de requisições).
  */
 export const INDEX_SYNC_FORCED_MIN_INTERVAL_MS = 2 * 60 * 1000;
+
+/** Mensagem quando nada foi buscado por causa do intervalo mínimo. */
+export const INDEX_SYNC_THROTTLED_MESSAGE = "Os índices foram consultados há instantes; tente de novo em alguns minutos.";
 
 async function cachedRange(db: Database, indexer: RateIndexer) {
   const agg = await db.indexDailyRate.aggregate({
@@ -64,15 +68,18 @@ export async function syncIndexRates(
     if (opts.from <= to) windows.push([opts.from, to]);
   } else {
     const status = await db.indexSyncStatus.findUnique({ where: { indexer } });
-    const minInterval = opts.force ? INDEX_SYNC_FORCED_MIN_INTERVAL_MS : INDEX_SYNC_MIN_INTERVAL_MS;
-    const recentlyTried =
-      status?.lastAttemptAt != null && now.getTime() - status.lastAttemptAt.getTime() < minInterval;
-    if (!recentlyTried) {
-      // Só busca antes da menor data se houver dia útil no intervalo.
-      if (opts.from < range.min && businessDaysBetween(opts.from, range.min).length > 0) {
-        windows.push([opts.from, addDays(range.min, -1)]);
-      }
-      if (range.max < to) windows.push([addDays(range.max, 1), to]);
+    const sinceLastAttempt = status?.lastAttemptAt ? now.getTime() - status.lastAttemptAt.getTime() : Number.POSITIVE_INFINITY;
+    // Taxas ANTIGAS que faltam (ex.: aporte com data antiga): dado necessário,
+    // busca assim que possível — no máximo 1 tentativa a cada 2 min.
+    const needsBackfill = opts.from < range.min && businessDaysBetween(opts.from, range.min).length > 0;
+    const backfillAllowed = sinceLastAttempt >= INDEX_SYNC_FORCED_MIN_INTERVAL_MS;
+    // Datas recentes (podem nem ter sido publicadas): 1 h; com `force`, 2 min.
+    const needsForward = range.max < to;
+    const forwardAllowed = sinceLastAttempt >= (opts.force ? INDEX_SYNC_FORCED_MIN_INTERVAL_MS : INDEX_SYNC_MIN_INTERVAL_MS);
+    if (needsBackfill && backfillAllowed) windows.push([opts.from, addDays(range.min, -1)]);
+    if (needsForward && forwardAllowed) windows.push([addDays(range.max, 1), to]);
+    if (windows.length === 0 && ((needsBackfill && !backfillAllowed) || (needsForward && !forwardAllowed))) {
+      return { indexer, status: "SKIPPED", inserted: 0, message: INDEX_SYNC_THROTTLED_MESSAGE, knownUntil: range.max };
     }
   }
   if (windows.length === 0) {

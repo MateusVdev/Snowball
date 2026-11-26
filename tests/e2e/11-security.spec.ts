@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import pg from "pg";
+import { loadTestEnv } from "../support/load-test-env";
 import { E2E_USER } from "./fixtures";
 import { login } from "./helpers";
 
@@ -103,4 +105,32 @@ test("CSRF: Server Action reenviada a partir de outro site é recusada (nada é 
   await nameField.fill(E2E_USER.name);
   await page.locator("[data-testid=profile-form] button[type=submit]").click();
   await expect(page.getByTestId("form-success")).toContainText("Perfil atualizado");
+});
+
+test("proxy: URL com '%' malformado → 400 (não 500); páginas com final '.png' também recebem CSP", async ({ page, request }) => {
+  const bad = await request.get("/renda-fixa/%E0%A4%A", { maxRedirects: 0 });
+  expect(bad.status()).toBe(400);
+  expect(bad.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  await login(page);
+  for (const path of ["/renda-fixa/%E0%A4%A", "/carteira/%E0%A4%A"]) {
+    expect((await page.request.get(path, { maxRedirects: 0 })).status(), path).toBe(400); // antes: 500
+  }
+  const pngLike = await page.request.get("/renda-fixa/qualquer.png", { maxRedirects: 0 });
+  expect(pngLike.headers()["content-security-policy"]).toMatch(/script-src 'self' 'nonce-/); // antes: sem CSP
+});
+
+test("retenção: após um login, tentativas com mais de 90 dias são apagadas", async ({ page }) => {
+  const client = new pg.Client({ connectionString: loadTestEnv() });
+  await client.connect();
+  try {
+    await client.query(
+      `INSERT INTO login_attempts (id, email, success, created_at) VALUES ('e2e-retencao-antiga', 'antigo@e2e.test', false, now() - interval '100 days')`,
+    );
+    await login(page); // o login agenda a limpeza para depois da resposta (after)
+    await expect
+      .poll(async () => (await client.query("SELECT count(*)::int AS n FROM login_attempts WHERE id = 'e2e-retencao-antiga'")).rows[0].n, { timeout: 10_000 })
+      .toBe(0);
+  } finally {
+    await client.end();
+  }
 });

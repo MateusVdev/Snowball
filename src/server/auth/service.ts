@@ -1,7 +1,9 @@
 import type { Database } from "@/server/db/factory";
+import { Prisma } from "@/generated/prisma/client";
 import { createUserSchema, type CreateUserInput } from "@/validation/auth";
 import { getDummyPasswordHash, hashPassword, verifyPassword } from "./password";
-import { isLoginRateLimited, rateLimitWindowStart } from "./rate-limit";
+import { isLoginRateLimited, rateLimitWindowStart, type FailureCounts } from "./rate-limit";
+import { rateLimitIpKey } from "./client-ip";
 import {
   generateSessionToken,
   hashSessionToken,
@@ -67,18 +69,59 @@ export async function changePassword(
   ]);
 }
 
+/** Espera máxima pela trava de tentativas (fila longa = enxurrada de tentativas). */
+const ATTEMPT_LOCK_TIMEOUT_MS = 1000;
+
+/** Falhas na janela, nas três dimensões, em UMA consulta (índices email/ip + created_at). */
+async function failureCounts(
+  q: Database | Prisma.TransactionClient,
+  email: string,
+  ipKey: string | null,
+  since: Date,
+): Promise<FailureCounts> {
+  const [row] = await q.$queryRaw<{ by_email: number; by_ip: number; by_email_and_ip: number }[]>`
+    SELECT
+      count(*) FILTER (WHERE email = ${email})::int AS by_email,
+      count(*) FILTER (WHERE ip_address = ${ipKey})::int AS by_ip,
+      count(*) FILTER (WHERE email = ${email} AND ip_address = ${ipKey})::int AS by_email_and_ip
+    FROM login_attempts
+    WHERE success = false AND created_at >= ${since} AND (email = ${email} OR ip_address = ${ipKey})`;
+  return {
+    byEmail: row.by_email,
+    byIp: ipKey ? row.by_ip : 0,
+    // IP desconhecido: o limite baixo vale para o e-mail inteiro.
+    byEmailAndIp: ipKey ? row.by_email_and_ip : row.by_email,
+  };
+}
+
+/** Erro do PostgreSQL 55P03 (lock_not_available), em qualquer nível do erro do Prisma. */
+function isLockTimeout(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 5; depth++) {
+    const err = e as { code?: unknown; message?: unknown; meta?: unknown; cause?: unknown };
+    if (err.code === "55P03" || /55P03|lock timeout/i.test(`${err.message ?? ""} ${JSON.stringify(err.meta ?? "")}`)) return true;
+    e = err.cause;
+  }
+  return false;
+}
+
 /**
  * Reserva uma tentativa de autenticação para o e-mail/IP, respeitando o limite.
  *
  * Causa raiz corrigida (auditoria de segurança): antes, a contagem de falhas
  * era lida ANTES de registrar a tentativa; requisições simultâneas liam a
  * mesma contagem e TODAS passavam (30 senhas testadas em paralelo com limite
- * de 5). Agora, numa transação:
- * 1. advisory locks do PostgreSQL serializam as tentativas do mesmo e-mail e
- *    do mesmo IP (sempre nessa ordem — sem risco de deadlock);
- * 2. a contagem inclui as tentativas em andamento;
- * 3. a tentativa é gravada como FALHA antes de conferir a senha; só vira
- *    sucesso depois da conferência (ver `finishAttempt`).
+ * de 5). Agora:
+ * 1. pré-checagem SEM trava: quem já estourou o limite é recusado sem entrar
+ *    na fila — uma enxurrada de tentativas não prende conexões do pool
+ *    (revisão de segurança: a fila na trava chegou a travar o app por 7 s);
+ * 2. numa transação READ COMMITTED (explícito: em REPEATABLE READ a contagem
+ *    usaria uma "foto" anterior à espera e a corrida voltaria), advisory locks
+ *    do PostgreSQL serializam as tentativas do mesmo e-mail e do mesmo IP
+ *    (sempre nessa ordem — sem deadlock), com espera máxima de 1 s
+ *    (`lock_timeout`; estourou = "muitas tentativas", falha fechada);
+ * 3. a contagem inclui as tentativas em andamento: a nova é gravada como
+ *    FALHA antes de conferir a senha e só vira sucesso depois (`finishAttempt`).
+ * O IP é agrupado por `rateLimitIpKey` (IPv6 por bloco /64).
  */
 async function reserveAttempt(
   db: Database,
@@ -86,24 +129,29 @@ async function reserveAttempt(
   ipAddress: string | null,
   now: Date,
 ): Promise<{ limited: true } | { limited: false; attemptId: string }> {
-  const windowStart = rateLimitWindowStart(now);
-  return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`login:email:${email}`}, 0))`;
-    if (ipAddress) {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`login:ip:${ipAddress}`}, 0))`;
-    }
-    const failed = { success: false, createdAt: { gte: windowStart } } as const;
-    const byEmail = await tx.loginAttempt.count({ where: { email, ...failed } });
-    const byIp = ipAddress ? await tx.loginAttempt.count({ where: { ipAddress, ...failed } }) : 0;
-    const byEmailAndIp = ipAddress
-      ? await tx.loginAttempt.count({ where: { email, ipAddress, ...failed } })
-      : byEmail;
-    if (isLoginRateLimited({ byEmail, byIp, byEmailAndIp })) return { limited: true };
-    const attempt = await tx.loginAttempt.create({
-      data: { email, ipAddress, success: false, createdAt: now },
-    });
-    return { limited: false, attemptId: attempt.id };
-  });
+  const ipKey = rateLimitIpKey(ipAddress);
+  const since = rateLimitWindowStart(now);
+  if (isLoginRateLimited(await failureCounts(db, email, ipKey, since))) return { limited: true };
+  try {
+    return await db.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${ATTEMPT_LOCK_TIMEOUT_MS}ms`}, true)`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`login:email:${email}`}, 0))`;
+        if (ipKey) {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`login:ip:${ipKey}`}, 0))`;
+        }
+        if (isLoginRateLimited(await failureCounts(tx, email, ipKey, since))) return { limited: true as const };
+        const attempt = await tx.loginAttempt.create({
+          data: { email, ipAddress: ipKey, success: false, createdAt: now },
+        });
+        return { limited: false as const, attemptId: attempt.id };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
+  } catch (error) {
+    if (isLockTimeout(error)) return { limited: true };
+    throw error;
+  }
 }
 
 async function finishAttempt(db: Database, attemptId: string, success: boolean) {

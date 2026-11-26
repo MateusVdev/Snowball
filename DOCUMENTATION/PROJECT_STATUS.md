@@ -34,6 +34,9 @@ Relatório completo em `SECURITY.md`. Resumo:
 - Sem migração; sem variáveis de ambiente novas.
 - Testes novos: `tests/unit/security.test.ts`, `tests/integration/security.test.ts`, `tests/e2e/11-security.spec.ts` e casos extras em `tests/unit/redirect.test.ts`.
 - Teste antigo dependente da data (renda fixa) tornado determinístico.
+- **Segunda revisão independente** (mesmo dia):
+  - 7 problemas nas próprias correções e 2 não detectados antes (R1–R9 em `SECURITY.md`);
+  - todos corrigidos e cobertos por testes que falham no código anterior.
 
 ---
 

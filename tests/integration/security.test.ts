@@ -20,7 +20,12 @@ import {
   deleteFixedIncomeMovement,
   updateFixedIncomeAsset,
 } from "@/server/services/fixed-income/fixed-income-service";
-import { INDEX_SYNC_FORCED_MIN_INTERVAL_MS, syncIndexRates } from "@/server/services/fixed-income/index-rate-service";
+import {
+  INDEX_SYNC_FORCED_MIN_INTERVAL_MS,
+  INDEX_SYNC_THROTTLED_MESSAGE,
+  syncIndexRates,
+} from "@/server/services/fixed-income/index-rate-service";
+import { createPrismaClient } from "@/server/db/factory";
 import { deleteFixedIncomeSimulation, saveFixedIncomeSimulation } from "@/server/services/fixed-income/simulation-service";
 import { createGoal, deleteGoal } from "@/server/services/goals/goal-service";
 import { archiveFund, createFund, updateFundInfo } from "@/server/services/portfolio/fund-service";
@@ -46,10 +51,17 @@ describe("força bruta no login (condição de corrida corrigida)", () => {
       Array.from({ length: 30 }, (_, i) => login(db, { email: "alvo@teste.dev", password: `chute-${i}` }, opts("203.0.113.9"))),
     );
     const tested = results.filter((r) => !r.ok && r.reason === "invalid_credentials").length;
-    expect(tested).toBe(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp); // antes da correção: 30 de 30
+    // Nunca mais que o limite (antes da correção: 30 de 30). "≤" e não "=": sob
+    // contenção extrema, a espera máxima pela trava (1 s) recusa antes — falha fechada.
+    expect(tested).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
+    expect(tested).toBeGreaterThan(0);
     expect(results.filter((r) => !r.ok && r.reason === "rate_limited")).toHaveLength(30 - tested);
+    expect(await db.loginAttempt.count({ where: { success: false } })).toBe(tested);
+    // Completa o limite de forma sequencial e confirma o bloqueio, mesmo com a senha certa.
+    for (let i = tested; i < LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp; i++) {
+      await login(db, { email: "alvo@teste.dev", password: `seq-${i}` }, opts("203.0.113.9"));
+    }
     expect(await login(db, { email: "alvo@teste.dev", password: PASSWORD }, opts("203.0.113.9"))).toEqual({ ok: false, reason: "rate_limited" });
-    expect(await db.loginAttempt.count({ where: { success: false } })).toBe(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
   });
 
   it("sem IP conhecido o limite continua valendo para o e-mail (também em paralelo)", async () => {
@@ -57,7 +69,9 @@ describe("força bruta no login (condição de corrida corrigida)", () => {
     const results = await Promise.all(
       Array.from({ length: 12 }, (_, i) => login(db, { email: "semip@teste.dev", password: `x${i}` }, opts(null))),
     );
-    expect(results.filter((r) => !r.ok && r.reason === "invalid_credentials")).toHaveLength(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
+    const tested = results.filter((r) => !r.ok && r.reason === "invalid_credentials").length;
+    expect(tested).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
+    expect(tested).toBeGreaterThan(0);
   });
 
   it("um IP atacante não bloqueia o dono em outro IP; o teto global por e-mail continua", async () => {
@@ -86,7 +100,10 @@ describe("senha atual na troca de senha (antes sem limite)", () => {
     const user = await createUser(db, { email: "troca@teste.dev", name: "T", password: PASSWORD });
     const meta = { meta: { ipAddress: "203.0.113.20" } };
     const parallel = await Promise.all(Array.from({ length: 10 }, (_, i) => checkPasswordWithLimit(db, user.id, `chute${i}`, meta)));
-    expect(parallel.filter((r) => r === "invalid")).toHaveLength(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
+    const tested = parallel.filter((r) => r === "invalid").length;
+    expect(tested).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
+    expect(tested).toBeGreaterThan(0);
+    for (let i = tested; i < LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp; i++) await checkPasswordWithLimit(db, user.id, `seq${i}`, meta);
     expect(await checkPasswordWithLimit(db, user.id, PASSWORD, meta)).toBe("rate_limited");
     expect(await login(db, { email: "troca@teste.dev", password: PASSWORD }, opts("203.0.113.20"))).toMatchObject({ reason: "rate_limited" });
     // Fora da janela, volta ao normal.
@@ -220,5 +237,96 @@ describe("atualização forçada dos índices não martela o Banco Central", () 
     const later = new Date(t0.getTime() + INDEX_SYNC_FORCED_MIN_INTERVAL_MS + 1000);
     expect((await syncIndexRates(db, provider, "CDI", { from: "2026-11-02", to: "2026-11-19", now: later, force: true })).status).toBe("SUCCESS");
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("segunda revisão de segurança", () => {
+  const attackLogin = (client: typeof db, email: string, password: string, ip: string | null) =>
+    login(client, { email, password }, opts(ip)).then(
+      (r) => (r.ok ? "ok" : r.reason),
+      (e: unknown) => `erro: ${String((e as Error).message).split("\n")[0]}`,
+    );
+
+  it("a corrida continua fechada mesmo se o banco usar REPEATABLE READ (isolamento explícito)", async () => {
+    await createUser(db, { email: "rr@teste.dev", name: "RR", password: PASSWORD });
+    const base = process.env.DATABASE_URL!;
+    const rr = createPrismaClient(`${base}${base.includes("?") ? "&" : "?"}options=${encodeURIComponent("-c default_transaction_isolation=repeatable\\ read")}`);
+    try {
+      const [{ i }] = await rr.$queryRaw<{ i: string }[]>`SELECT current_setting('default_transaction_isolation') AS i`;
+      expect(i).toBe("repeatable read");
+      const results = await Promise.all(Array.from({ length: 30 }, (_, k) => attackLogin(rr, "rr@teste.dev", `x${k}`, "203.0.113.9")));
+      // Antes da correção: 14 de 30 senhas testadas neste cenário.
+      expect(results.filter((r) => r === "invalid_credentials").length).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp);
+    } finally {
+      await rr.$disconnect();
+    }
+  });
+
+  it("fila na trava não prende o pool: espera limitada e o resto do app segue respondendo", async () => {
+    await createUser(db, { email: "fila@teste.dev", name: "F", password: PASSWORD });
+    const holder = createPrismaClient(process.env.DATABASE_URL!);
+    // Outra conexão segura a trava do e-mail por 6 s (fila longa).
+    const hold = holder.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('login:email:fila@teste.dev', 0))`;
+      await new Promise((r) => setTimeout(r, 6000));
+    }, { timeout: 15_000 });
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const started = Date.now();
+      const logins = Promise.all(Array.from({ length: 12 }, (_, k) => attackLogin(db, "fila@teste.dev", `x${k}`, `203.0.113.${k + 1}`)));
+      await new Promise((r) => setTimeout(r, 200));
+      const q = Date.now();
+      await db.user.count(); // qualquer outra consulta do app
+      const otherQueryMs = Date.now() - q;
+      const results = await logins;
+      // Antes: outra consulta esperou ~7 s (pool inteiro preso) e houve erros.
+      expect(otherQueryMs).toBeLessThan(3000);
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(new Set(results)).toEqual(new Set(["rate_limited"])); // falha fechada: nenhuma senha testada
+      expect(await db.loginAttempt.count()).toBe(0);
+    } finally {
+      await hold;
+      await holder.$disconnect();
+    }
+  }, 30_000);
+
+  it("IPv6: trocar de endereço dentro do mesmo /64 não dá limite novo", async () => {
+    await createUser(db, { email: "v6@teste.dev", name: "V6", password: PASSWORD });
+    let tested = 0;
+    for (let host = 1; host <= 10; host++) {
+      for (let k = 0; k < 5; k++) {
+        if ((await attackLogin(db, "v6@teste.dev", `x${host}-${k}`, `2001:db8:1:2::${host.toString(16)}`)) === "invalid_credentials") tested++;
+      }
+    }
+    expect(tested).toBe(LOGIN_RATE_LIMIT.maxFailuresPerEmailAndIp); // antes: 30
+    // Outro /64 é outro cliente.
+    expect(await attackLogin(db, "v6@teste.dev", PASSWORD, "2001:db8:1:3::1")).toBe("ok");
+    // IPv4 mapeado em IPv6 = o mesmo IPv4.
+    for (let k = 0; k < 5; k++) await attackLogin(db, "v6@teste.dev", `y${k}`, "198.51.100.7");
+    expect(await attackLogin(db, "v6@teste.dev", PASSWORD, "::ffff:198.51.100.7")).toBe("rate_limited");
+  });
+
+  it("índices: taxas antigas que faltam não esperam 1 hora; o 'forçar' repetido avisa que nada foi buscado", async () => {
+    const calls: string[] = [];
+    const provider: IndexRateProvider = {
+      id: "BCB",
+      name: "Banco Central (simulado)",
+      async getDailyRates(_i, from, to) {
+        calls.push(`${from}..${to}`);
+        return businessDaysBetween(from, addDays(to, 1)).map((date) => ({ date, dailyRatePercent: "0.05" }));
+      },
+    };
+    const t0 = new Date("2026-11-20T12:00:00Z");
+    await syncIndexRates(db, provider, "CDI", { from: "2026-10-01", to: "2026-11-19", now: t0 });
+    // 3 min depois, um aporte antigo (setembro) precisa de taxas anteriores: busca já, sem esperar 1 h.
+    const backfill = await syncIndexRates(db, provider, "CDI", { from: "2026-09-01", to: "2026-11-19", now: new Date(t0.getTime() + 3 * 60_000) });
+    expect(backfill.status).toBe("SUCCESS");
+    expect(calls.at(-1)).toBe("2026-09-01..2026-09-30");
+    // Clique repetido logo em seguida: nada é buscado e a mensagem diz isso.
+    const again = await syncIndexRates(db, provider, "CDI", { from: "2026-08-01", to: "2026-11-25", now: new Date(t0.getTime() + 3 * 60_000 + 10_000), force: true });
+    expect(again).toMatchObject({ status: "SKIPPED", message: INDEX_SYNC_THROTTLED_MESSAGE });
+    // Já atualizado (nada a buscar): SKIPPED sem mensagem de intervalo.
+    const upToDate = await syncIndexRates(db, provider, "CDI", { from: "2026-09-01", to: "2026-11-19", now: new Date(t0.getTime() + 60 * 60_000) });
+    expect(upToDate).toMatchObject({ status: "SKIPPED", message: null });
   });
 });

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { clientIpFromHeaders } from "@/server/auth/client-ip";
+import { clientIpFromHeaders, rateLimitIpKey } from "@/server/auth/client-ip";
 import { PUBLIC_PATHS } from "@/server/auth/constants";
 import { LOGIN_RATE_LIMIT, isLoginRateLimited } from "@/server/auth/rate-limit";
 import { secretsEqual } from "@/server/auth/tokens";
@@ -20,23 +20,44 @@ describe("guarda: toda Server Action exige sessão", () => {
   // Server Actions são endpoints POST públicos e podem ser chamadas a partir de
   // QUALQUER página (inclusive /login): o layout/proxy não as protege.
   const PUBLIC_ACTIONS = new Set(["loginAction", "logoutAction"]);
-  const files = walk("src").filter((f) => /\.(ts|tsx)$/.test(f) && readFileSync(f, "utf8").includes('"use server"'));
+  const DIRECTIVE = /["']use server["']/; // aspas simples ou duplas, em qualquer posição
+  const sources = walk("src").filter((f) => /\.(ts|tsx|js|jsx|mjs)$/.test(f));
+  const files = sources.filter((f) => DIRECTIVE.test(readFileSync(f, "utf8")));
 
-  it("'use server' só aparece nos módulos de actions (nenhuma action embutida em página/componente)", () => {
+  it("encontra os módulos de actions (o guarda não está vazio)", () => {
+    expect(files.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("a diretiva só aparece no topo dos módulos de actions (nenhuma action embutida em página/componente)", () => {
     for (const f of files) {
       expect(f, f).toMatch(/src\/server\/(actions\/[^/]+|auth\/actions)\.ts$/);
-      expect(readFileSync(f, "utf8").trimStart().startsWith('"use server"'), f).toBe(true);
+      expect(readFileSync(f, "utf8").trimStart(), f).toMatch(/^["']use server["'];?/);
     }
   });
 
-  it.each(files)("%s: cada action exportada chama requireUser() logo no início", (file) => {
+  it.each(files)("%s: só exporta 'export async function' e cada uma chama requireUser() no início", (file) => {
     const source = readFileSync(file, "utf8");
-    const actions = [...source.matchAll(/export async function (\w+)\([^)]*\)[^{]*\{/g)];
-    expect(actions.length).toBeGreaterThan(0);
+    // Qualquer outra forma de export (arrow function, const, default, export {…})
+    // escaparia da verificação abaixo — então é proibida nos módulos de actions.
+    // Tipos (interface/type) são apagados na compilação e não viram endpoints.
+    const runtimeExports = [...source.matchAll(/^\s*export\b(.*)$/gm)]
+      .map((m) => m[1].trim())
+      .filter((e) => !/^(interface|type) \w+/.test(e));
+    for (const e of runtimeExports) expect(e, `export não permitido: "export ${e}"`).toMatch(/^async function \w+\(/);
+    const actions = [...source.matchAll(/export async function (\w+)\(/g)];
+    expect(actions.length).toBe(runtimeExports.length);
     for (const m of actions) {
       if (PUBLIC_ACTIONS.has(m[1])) continue;
-      const body = source.slice(m.index! + m[0].length, m.index! + m[0].length + 300);
-      expect(body, `${m[1]} deve chamar requireUser()`).toMatch(/await requireUser\(\)/);
+      const body = source.slice(m.index!, m.index! + 600);
+      const open = body.indexOf("{", body.indexOf(")"));
+      expect(body.slice(open, open + 300), `${m[1]} deve chamar requireUser()`).toMatch(/^\{\s*(\/\/[^\n]*\s*)*const \w+ = await requireUser\(\);/);
+    }
+  });
+
+  it("o app nunca usa a conferência de senha SEM limite (verifyUserPassword)", () => {
+    for (const f of sources) {
+      if (f.endsWith("src/server/auth/service.ts")) continue;
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/verifyUserPassword/);
     }
   });
 });
@@ -74,11 +95,36 @@ describe("IP do cliente (limite de tentativas)", () => {
     expect(clientIpFromHeaders(h({ "x-vercel-forwarded-for": "203.0.113.9", "x-forwarded-for": "203.0.113.9" }), { onVercel: true })).toBe("203.0.113.9");
   });
 
+  it("em listas vale o ÚLTIMO valor (o anterior pode ter sido inventado pelo cliente)", () => {
+    expect(clientIpFromHeaders(h({ "x-vercel-forwarded-for": "1.1.1.1, 203.0.113.9" }), { onVercel: true })).toBe("203.0.113.9");
+    expect(clientIpFromHeaders(h({ "x-real-ip": "1.1.1.1, 198.51.100.2" }))).toBe("198.51.100.2");
+  });
+
   it("só aceita IPs válidos (nada de texto arbitrário no banco)", () => {
     expect(clientIpFromHeaders(h({ "x-real-ip": "<script>" }))).toBeNull();
     expect(clientIpFromHeaders(h({ "x-forwarded-for": "1.1.1.1, x".repeat(40) }))).toBeNull();
     expect(clientIpFromHeaders(h({ "x-real-ip": "2001:db8::1" }))).toBe("2001:db8::1");
     expect(clientIpFromHeaders(h({}))).toBeNull();
+  });
+});
+
+describe("chave de IP do limite de tentativas", () => {
+  it.each([
+    ["203.0.113.5", "203.0.113.5"],
+    ["::ffff:203.0.113.5", "203.0.113.5"], // IPv4 mapeado = o mesmo cliente
+    ["::FFFF:cb00:7105", "203.0.113.5"],
+    ["2001:db8:1:2::1", "2001:db8:1:2::/64"],
+    ["2001:DB8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"], // mesmo /64
+    ["2001:db8:1:3::1", "2001:db8:1:3::/64"], // outro /64
+    ["fe80::1%eth0", "fe80:0:0:0::/64"],
+    ["2001:db8::203.0.113.5", "2001:db8:0:0::/64"],
+    ["::", "0:0:0:0::/64"],
+  ])("%s → %s", (ip, key) => {
+    expect(rateLimitIpKey(ip)).toBe(key);
+  });
+
+  it.each(["", "abc", "1.2.3", "2001:db8::1::2", null, undefined])("inválido (%s) → null", (ip) => {
+    expect(rateLimitIpKey(ip)).toBeNull();
   });
 });
 
