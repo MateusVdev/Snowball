@@ -210,8 +210,9 @@ Implementação própria, sem bibliotecas de terceiros, adequada a uso individua
 | ---------------------------- | ---------------- |
 | `password.ts`   | Hash/verificação scrypt (`node:crypto`), comparação em tempo constante |
 | `tokens.ts`     | Token aleatório de 256 bits; banco guarda só o SHA-256 |
-| `rate-limit.ts` | Política anti força bruta (5 falhas/e-mail ou 20/IP em 15 min) |
-| `redirect.ts`   | Sanitiza `?next=` (proteção contra open redirect) |
+| `rate-limit.ts` | Política anti força bruta, em 15 min: 5 falhas por e-mail+IP, 30 por e-mail (todos os IPs), 20 por IP |
+| `client-ip.ts`  | IP do cliente sem confiar em valores inventados pelo cliente (Vercel / proxy reverso; último valor das listas) e chave do limite (IPv6 agrupado por /64) |
+| `redirect.ts`   | Sanitiza `?next=` com o parser de URL dos navegadores (proteção contra open redirect) |
 | `service.ts`    | Casos de uso independentes do Next: `createUser`, `login`, `validateSessionToken`, `revokeSession`, `changePassword`, `purgeExpiredAuthData` |
 | `session.ts`    | Cookie de sessão (`HttpOnly`, `SameSite=Lax`, `Secure` em produção) e metadados da requisição |
 | `dal.ts`        | **Data Access Layer**: `getCurrentUser()` / `requireUser()` — único ponto de leitura do usuário atual |
@@ -220,15 +221,21 @@ Implementação própria, sem bibliotecas de terceiros, adequada a uso individua
 
 Fluxo:
 
-1. `proxy.ts` deixa passar rotas públicas (`/login`, `/api/health`); sem cookie,
+1. `proxy.ts` deixa passar rotas públicas (`/login`, `/api/health`, `/api/cron`); sem cookie,
    redireciona páginas para `/login?next=…` e responde `401` para `/api/*`.
 2. A verificação **real** acontece na DAL, que consulta a sessão no banco
    (existência e expiração). O layout `(app)` chama `requireUser()`.
 3. **Toda Server Action e Route Handler privado deve chamar
    `requireUser()`/`getCurrentUser()` por conta própria** — layouts não protegem
    actions.
-4. Login: valida com Zod → verifica rate limit → verifica senha (mesmo custo
-   para e-mail inexistente) → registra tentativa → cria sessão → define cookie.
+4. Login: valida com Zod → pré-checagem do limite **sem trava** (quem já
+   estourou é recusado sem entrar na fila) → **reserva a tentativa** numa
+   transação `READ COMMITTED` explícita, com advisory lock por e-mail e por IP
+   (espera máxima de 1 s; estourou = "muitas tentativas"), contando inclusive as
+   tentativas em andamento e gravando a nova como falha → verifica a senha (mesmo
+   custo para e-mail inexistente) → marca a tentativa como sucesso → cria sessão
+   → define cookie → após a resposta, limpa dados de autenticação antigos. A
+   "senha atual" da troca de senha usa o mesmo limite (`checkPasswordWithLimit`).
 5. Logout: apaga a sessão no banco e expira o cookie.
 6. Sessão com duração fixa (`SESSION_TTL_HOURS`, padrão 7 dias), sem renovação
    automática. Trocar a senha encerra todas as sessões.
@@ -239,9 +246,10 @@ Não há página de cadastro: o usuário é criado por CLI (`npm run user:create
 
 ### Observações de implantação
 
-- `X-Forwarded-For` é usado para rate limit por IP; só é confiável atrás de um
-  proxy reverso que sobrescreva o cabeçalho. O limite por e-mail funciona
-  independentemente disso.
+- IP do cliente (`client-ip.ts`): na Vercel, `x-vercel-forwarded-for`/`x-real-ip`
+  (definidos pela plataforma); fora dela, `x-real-ip` ou o ÚLTIMO valor de
+  `X-Forwarded-For` (o do proxy reverso). Sem proxy na frente, nenhum cabeçalho
+  é confiável — os limites por e-mail continuam valendo.
 - Servir apenas via HTTPS (cabeçalho HSTS já configurado).
 
 ## Decisões técnicas
@@ -262,8 +270,12 @@ Não há página de cadastro: o usuário é criado por CLI (`npm run user:create
 
 Configurados em `next.config.ts` para todas as rotas: `X-Frame-Options: DENY`,
 `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`,
-`Strict-Transport-Security`; `X-Powered-By` desativado. Content-Security-Policy
-com nonce fica como melhoria futura.
+`Strict-Transport-Security`; `X-Powered-By` desativado.
+
+Content-Security-Policy com nonce por requisição, aplicada pelo `proxy.ts` a
+todas as páginas e rotas (o matcher só exclui `/_next/static`, `/_next/image`,
+`favicon.ico` e `robots.txt`). URLs com codificação `%` malformada recebem 400.
+Detalhes em `SECURITY.md`.
 
 ## Testes
 

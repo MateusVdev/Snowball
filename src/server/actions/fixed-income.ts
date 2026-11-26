@@ -14,6 +14,7 @@ import {
   updateFixedIncomeMovement,
 } from "@/server/services/fixed-income/fixed-income-service";
 import { ensureIndexRates } from "@/server/services/fixed-income/refresh";
+import { INDEX_SYNC_THROTTLED_MESSAGE } from "@/server/services/fixed-income/index-rate-service";
 import { z } from "zod";
 import {
   fixedIncomeMovementSchema,
@@ -150,5 +151,10 @@ export async function refreshIndexRatesAction(): Promise<FormState> {
   const failed = results.filter((r) => r.status === "FAILED");
   if (results.length === 0) return { success: "Nada a atualizar.", ts: Date.now() };
   if (failed.length) return { error: `Não foi possível atualizar: ${failed.map((f) => f.message).join(" ")} Os valores usam os índices já guardados.`, ts: Date.now() };
+  // Nada foi buscado: diz o motivo (intervalo mínimo ou já atualizados) — nunca "atualizados".
+  if (results.every((r) => r.status === "SKIPPED")) {
+    const throttled = results.find((r) => r.message === INDEX_SYNC_THROTTLED_MESSAGE);
+    return { success: throttled ? INDEX_SYNC_THROTTLED_MESSAGE : "Os índices já estão atualizados.", ts: Date.now() };
+  }
   return { success: "Índices do Banco Central atualizados.", ts: Date.now() };
 }

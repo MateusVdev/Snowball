@@ -34,10 +34,27 @@ export function buildCsp(nonce: string, isDev: boolean) {
   ].join("; ");
 }
 
+/** Caminho com codificação "%" válida (o Next responde 500 para "%E0%A4%A" em rotas dinâmicas). */
+function hasValidEncoding(pathname: string): boolean {
+  try {
+    decodeURIComponent(pathname);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const csp = buildCsp(nonce, process.env.NODE_ENV === "development");
   const { pathname, search } = request.nextUrl;
+
+  if (!hasValidEncoding(pathname)) {
+    return new NextResponse("Endereço inválido.", {
+      status: 400,
+      headers: { "Content-Security-Policy": csp, "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
 
   const authorized = isPublicPath(pathname) || Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   let response: NextResponse;
@@ -59,7 +76,10 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Tudo, exceto assets estáticos do Next e arquivos públicos comuns.
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Tudo, exceto os assets estáticos do Next e o favicon. Antes, qualquer URL
+    // terminada em .png/.svg/… pulava o proxy — e uma PÁGINA do app nesse
+    // endereço (ex.: /renda-fixa/x.png) era servida SEM CSP. A pasta public/
+    // está vazia: não há imagens públicas a liberar.
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt).*)",
   ],
 };

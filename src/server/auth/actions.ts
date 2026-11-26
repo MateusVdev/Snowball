@@ -1,13 +1,14 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { getDb } from "@/server/db/client";
 import { getEnv } from "@/server/env";
 import { z } from "zod";
 import { loginSchema } from "@/validation/auth";
 import { LOGIN_PATH } from "./constants";
 import { safeRedirectPath } from "./redirect";
-import { login, revokeSession } from "./service";
+import { login, purgeExpiredAuthData, revokeSession } from "./service";
 import {
   clearSessionCookie,
   getRequestMeta,
@@ -67,6 +68,9 @@ export async function loginAction(
   }
 
   await setSessionCookie(result.token, result.expiresAt);
+  // Retenção (privacidade): após a resposta, apaga sessões vencidas e
+  // tentativas de login antigas (IP/e-mail) — antes nada era removido.
+  after(() => purgeExpiredAuthData(getDb()).catch((error) => console.error("[auth] limpeza falhou", error)));
   redirect(safeRedirectPath(formData.get("next")));
 }
 

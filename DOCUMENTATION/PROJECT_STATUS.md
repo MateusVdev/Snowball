@@ -17,7 +17,26 @@
 | RF-3 | Renda fixa — Parte 3: dashboard por classe, status do Banco Central, E2E | ✅ Concluída e publicada (PR #2) |
 | PJ-1 | Projeções — Parte 1: quanto a renda fixa rende | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
 | PJ-2 | Projeções — Parte 2: simulador de renda fixa com aportes | ✅ Concluída (2026-11-20) — branch `feature/projecoes`, sem merge |
-| PJ-3 | Projeções — Parte 3: patrimônio geral (simulação total, metas, dashboard) | ✅ Concluída (2026-11-20) — PR aberto, sem merge |
+| PJ-3 | Projeções — Parte 3: patrimônio geral (simulação total, metas, dashboard) | ✅ Concluída e publicada (PR #3) |
+| SEC | Auditoria completa de segurança + correções | ✅ Concluída (2026-11-26) — branch `security/auditoria`, sem merge |
+
+---
+
+## Auditoria de segurança (2026-11-26)
+
+Relatório completo em `SECURITY.md`. Resumo:
+- 10 problemas corrigidos no código:
+  - 1 alta: limite de login contornável por requisições simultâneas;
+  - 2 médias: open redirect no `?next=` e senha atual sem limite;
+  - 6 baixas;
+  - 1 informativa.
+- 1 pendente de configuração externa: papel de menor privilégio no Neon.
+- Sem migração; sem variáveis de ambiente novas.
+- Testes novos: `tests/unit/security.test.ts`, `tests/integration/security.test.ts`, `tests/e2e/11-security.spec.ts` e casos extras em `tests/unit/redirect.test.ts`.
+- Teste antigo dependente da data (renda fixa) tornado determinístico.
+- **Segunda revisão independente** (mesmo dia):
+  - 7 problemas nas próprias correções e 2 não detectados antes (R1–R9 em `SECURITY.md`);
+  - todos corrigidos e cobertos por testes que falham no código anterior.
 
 ---
 

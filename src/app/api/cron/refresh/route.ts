@@ -1,5 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { secretsEqual } from "@/server/auth/tokens";
+import { purgeExpiredAuthData } from "@/server/auth/service";
 import { getDb } from "@/server/db/client";
 import { getEnv } from "@/server/env";
 import { getIntegrations } from "@/server/integrations/registry";
@@ -17,15 +18,15 @@ export const maxDuration = 300;
 function authorized(request: NextRequest, secret: string) {
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const a = Buffer.from(token);
-  const b = Buffer.from(secret);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return secretsEqual(token, secret);
 }
 
 export async function GET(request: NextRequest) {
   const secret = getEnv().CRON_SECRET;
   if (!secret) return NextResponse.json({ error: "not_found" }, { status: 404 });
   if (!authorized(request, secret)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // Retenção: remove sessões vencidas e tentativas de login com mais de 90 dias.
+  await purgeExpiredAuthData(getDb()).catch((error) => console.error("[cron] limpeza de dados de autenticação falhou", error));
 
   const integrations = getIntegrations();
   if (!integrations.enabled) return NextResponse.json({ status: "disabled" });

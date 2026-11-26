@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { getEnv } from "@/server/env";
+import { clientIpFromHeaders } from "./client-ip";
 import { SESSION_COOKIE_NAME } from "./constants";
 import type { RequestMeta } from "./service";
 
@@ -39,15 +40,11 @@ export async function clearSessionCookie() {
   });
 }
 
-/**
- * Metadados para auditoria/rate limit. Atenção: X-Forwarded-For só é
- * confiável atrás de um proxy reverso que o sobrescreva (ver ARCHITECTURE.md).
- */
+/** Metadados para auditoria/rate limit (IP obtido de forma segura — ver client-ip.ts). */
 export async function getRequestMeta(): Promise<RequestMeta> {
   const h = await headers();
-  const forwarded = h.get("x-forwarded-for")?.split(",")[0]?.trim();
   return {
-    ipAddress: (forwarded || h.get("x-real-ip") || null)?.slice(0, 64) ?? null,
-    userAgent: h.get("user-agent"),
+    ipAddress: clientIpFromHeaders((name) => h.get(name), { onVercel: process.env.VERCEL === "1" }),
+    userAgent: h.get("user-agent")?.slice(0, 512) ?? null,
   };
 }
