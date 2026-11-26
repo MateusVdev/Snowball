@@ -176,36 +176,39 @@ Verificados **sem problemas**:
 
 ### Configurações externas recomendadas
 
+O passo a passo completo, **na ordem segura**, está em [`PUBLICACAO.md`](PUBLICACAO.md). Fontes: documentação oficial do Neon e da Vercel, conferida em 2026-11-26. Resumo:
+
 1. **Neon — papel de menor privilégio para o app (achado 11).**
-   - No console do Neon (Roles), crie o papel `snowball_app` e execute, como `neondb_owner`:
-     ```sql
-     GRANT CONNECT ON DATABASE neondb TO snowball_app;
-     GRANT USAGE ON SCHEMA public TO snowball_app;
-     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO snowball_app;
-     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO snowball_app;
-     ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
-       GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO snowball_app;
-     ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
-       GRANT USAGE, SELECT ON SEQUENCES TO snowball_app;
-     -- O app não deve mexer no histórico de migrações:
-     REVOKE ALL ON TABLE _prisma_migrations FROM snowball_app;
-     -- Opcional (a auditoria é somente-inserção):
-     REVOKE UPDATE, DELETE ON audit_events FROM snowball_app;
-     ```
-   - Na Vercel, `DATABASE_URL` (URL **pooled**) passa a usar `snowball_app`.
-   - As migrações continuam com `neondb_owner` pela URL **direta**, só no seu computador.
-   - Ganho: uma falha no app não consegue apagar tabelas, mudar o schema nem criar papéis.
-2. **Vercel:**
-   - Deployment Protection (Vercel Authentication) nos deploys de Preview.
-   - Previews **nunca** apontando para o banco de produção.
-   - Variáveis marcadas como *Sensitive*.
-   - Opcional, se o plano permitir: regra de rate limit no Firewall para `POST /login`.
-3. **Contas:** 2FA em GitHub, Vercel e Neon.
-4. **GitHub:**
-   - proteção da branch `main` (exigir PR);
-   - Dependabot alerts e secret scanning.
-5. **Credencial exposta em conversa anterior:** confirme que a branch de teste do Neon cuja URL foi colada no chat foi excluída, ou redefina a senha.
+   - **Não** criar pelo Console: papéis do Console (ou da CLI sem `--access`) entram em `neon_superuser`, que lê e grava todos os dados e cria papéis.
+   - Criar com `neon roles create --name snowball_app --access read_write --database neondb --schema public --branch production`:
+     - dá `SELECT/INSERT/UPDATE/DELETE` nas tabelas atuais e futuras do dono do banco;
+     - a senha é gerada e mostrada uma vez, sem ficar no histórico do SQL Editor.
+   - Complementar no SQL Editor:
+     - `USAGE, SELECT` nas sequências (`operations_sequence_seq`, usada ao registrar operações), também para as futuras;
+     - revogar `_prisma_migrations`;
+     - revogar `UPDATE/DELETE` em `audit_events`.
+   - Validado localmente: os 45 testes de tela passaram com o app usando um papel equivalente. Um controle negativo (papel sem login) confirmou que o teste usou mesmo esse papel.
+   - As migrações continuam com `neondb_owner` pela URL **direta**, só no computador do responsável. O build da Vercel não roda migrações.
+2. **Vercel — Previews isolados:**
+   - `DATABASE_URL` só no ambiente **Production**;
+   - **Vercel Authentication** com *Standard Protection* (todos os planos);
+   - apagar Previews antigos (eles guardam as variáveis da época);
+   - variável do banco como **Secret**;
+   - opcional: política *Separate Production Secret Values*.
+   - O build funciona sem `DATABASE_URL` (testado): o Preview sem banco é seguro.
+3. **Credencial exposta em conversa anterior:**
+   - no Neon, papéis (e senhas) são copiados para as branches novas, e a troca de senha vale por branch;
+   - apagar a branch de teste **não** invalida a senha na produção;
+   - redefinir a senha do `neondb_owner` na branch `production` **depois** que o app passar a usar `snowball_app` (para não derrubar o site).
+4. **Contas:** 2FA em GitHub, Vercel e Neon.
+5. **GitHub:**
+   - exigir PR na `main`;
+   - Dependabot alerts;
+   - secret scanning, se disponível.
 6. **Neon:** retenção de histórico (point-in-time restore) adequada ao plano.
+7. **Opcional:** regra de rate limit no Firewall da Vercel para `POST /login` (todos os planos, com aviso de preço na primeira regra).
+
+Confirmado na documentação da Vercel: ela **sobrescreve** `X-Forwarded-For` para impedir falsificação de IP, e `x-real-ip`/`x-vercel-forwarded-for` são idênticos a ele.
 
 ### Riscos que permanecem (aceitos ou dependentes de decisão)
 
